@@ -1,0 +1,14 @@
+# Local backend runtime output
+backend/dist/
+*.exe
+llamasales-backend-data.json
+
+# Local/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Temporary files
+*.tmp
+*.log
