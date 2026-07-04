@@ -1,22 +1,28 @@
 # LlamaSales Web App
 
-This repository contains the LlamaSales PWA frontend for Cloudflare Pages Git deployment.
+This repository contains the LlamaSales PWA frontend for Cloudflare Workers static assets deployment.
 
 ## Production URLs
 
 - PWA: `https://app.tiredllama.co.uk`
 - Backend/API: `https://api.tiredllama.co.uk`
 
-## Cloudflare Pages Setup
+## Cloudflare Workers Setup
 
-Connect this GitHub repository to Cloudflare Pages with these settings:
+Connect this GitHub repository to Cloudflare Workers Builds. The repository includes `wrangler.jsonc`, which tells Wrangler to deploy the static PWA from `./web`.
 
-- Framework preset: `None`
+Use these settings on Cloudflare's "Set up your application" screen:
+
+- Project name: `llamasaleswebapp`
 - Build command: leave blank
-- Build output directory: `web`
-- Root directory: leave as repository root
+- Deploy command: `npx wrangler deploy`
+- Builds for non-production branches: optional; safe to leave enabled
+- Non-production branch deploy command: `npx wrangler versions upload`
+- Path: `/`
+- API token: use the generated `llamasaleswebapp build token`
+- Variable name/value: leave blank
 
-Then add the custom domain:
+After deployment, add the custom domain:
 
 `app.tiredllama.co.uk`
 
@@ -24,7 +30,7 @@ The PWA automatically uses `https://api.tiredllama.co.uk` when served from `app.
 
 ## Backend
 
-The backend is not hosted by Cloudflare Pages. Keep running the local Windows backend executable on the laptop and expose it through Cloudflare Tunnel:
+The backend is not hosted by Cloudflare Workers. Keep running the local Windows backend executable on the laptop and expose it through Cloudflare Tunnel:
 
 `api.tiredllama.co.uk -> http://localhost:8787`
 
