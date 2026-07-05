@@ -276,7 +276,7 @@ h3 {
 }
 
 .sov-track,
-.sov-arc {
+.sov-fill {
   fill: none;
   stroke-linecap: round;
   stroke-width: 16;
@@ -284,19 +284,11 @@ h3 {
 }
 
 .sov-track {
-  stroke: rgba(92, 108, 130, 0.34);
+  stroke: rgba(33, 38, 49, 0.92);
 }
 
-.sov-red {
-  stroke: var(--red);
-}
-
-.sov-yellow {
-  stroke: var(--yellow);
-}
-
-.sov-green {
-  stroke: var(--green);
+.sov-fill {
+  stroke: var(--accent);
 }
 
 .sov-threshold {

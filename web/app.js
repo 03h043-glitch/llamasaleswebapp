@@ -982,9 +982,7 @@ function sovGauge(value, accent) {
     <div class="sov-gauge" style="--accent:${accent}">
       <svg viewBox="0 0 240 142" role="img" aria-label="Hisense share of value gauge at ${score}%">
         <path class="sov-track" d="${gaugeArc(0, 100)}"></path>
-        <path class="sov-arc sov-red" d="${gaugeArc(0, 10)}"></path>
-        <path class="sov-arc sov-yellow" d="${gaugeArc(10, 20)}"></path>
-        <path class="sov-arc sov-green" d="${gaugeArc(20, 100)}"></path>
+        ${score > 0 ? `<path class="sov-fill" d="${gaugeArc(0, score)}"></path>` : ""}
         <line class="sov-threshold" x1="${marker10.inner.x}" y1="${marker10.inner.y}" x2="${marker10.outer.x}" y2="${marker10.outer.y}"></line>
         <line class="sov-threshold" x1="${marker20.inner.x}" y1="${marker20.inner.y}" x2="${marker20.outer.x}" y2="${marker20.outer.y}"></line>
         <text class="sov-label" x="${label10.x}" y="${label10.y}">10%</text>
@@ -1002,7 +1000,7 @@ function gaugeArc(startPercent, endPercent) {
   const start = gaugePoint(startPercent, 92);
   const end = gaugePoint(endPercent, 92);
   const largeArc = Math.abs(endPercent - startPercent) > 100 ? 1 : 0;
-  return `M ${start.x} ${start.y} A 92 92 0 ${largeArc} 0 ${end.x} ${end.y}`;
+  return `M ${start.x} ${start.y} A 92 92 0 ${largeArc} 1 ${end.x} ${end.y}`;
 }
 
 function gaugeMarker(percent) {
