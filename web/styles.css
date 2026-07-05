@@ -260,64 +260,58 @@ h3 {
 }
 
 .sov-card {
-  min-height: 258px;
+  min-height: 218px;
 }
 
-.sov-gauge {
-  width: min(100%, 360px);
-  margin: 16px auto 0;
+.brand-share {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
 }
 
-.sov-gauge svg {
+.brand-share-bar {
+  display: flex;
+  height: 34px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: rgba(33, 38, 49, 0.92);
+}
+
+.brand-share-segment,
+.brand-share-empty {
   display: block;
-  width: 100%;
-  height: auto;
-  overflow: visible;
+  height: 100%;
+  min-width: 0;
 }
 
-.sov-track,
-.sov-fill {
-  fill: none;
-  stroke-linecap: round;
-  stroke-width: 16;
-  vector-effect: non-scaling-stroke;
+.brand-share-segment {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
 }
 
-.sov-track {
-  stroke: rgba(33, 38, 49, 0.92);
+.brand-share-empty {
+  flex: 1;
+  background: rgba(92, 108, 130, 0.32);
 }
 
-.sov-fill {
-  stroke: var(--accent);
-}
-
-.sov-threshold {
-  stroke: rgba(255, 255, 255, 0.86);
-  stroke-linecap: round;
-  stroke-width: 2.5;
-  vector-effect: non-scaling-stroke;
-}
-
-.sov-needle {
-  stroke: var(--accent);
-  stroke-linecap: round;
-  stroke-width: 4;
-  vector-effect: non-scaling-stroke;
-}
-
-.sov-hub {
-  fill: var(--accent);
-  stroke: rgba(255, 255, 255, 0.8);
-  stroke-width: 2;
-  vector-effect: non-scaling-stroke;
-}
-
-.sov-label,
-.sov-end-label {
-  fill: var(--muted);
+.brand-share-legend {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px 10px;
+  color: var(--muted);
   font-size: 10px;
-  font-weight: 900;
-  text-anchor: middle;
+  font-weight: 800;
+}
+
+.brand-share-legend span {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.brand-share-legend .swatch {
+  flex: 0 0 auto;
 }
 
 .progress {
@@ -374,6 +368,24 @@ h3 {
   background: rgba(0, 170, 166, 0.92);
   border-color: transparent;
   color: var(--ink);
+}
+
+.dashboard-filters {
+  gap: 4px;
+  padding: 5px;
+  border-color: rgba(142, 154, 194, 0.78);
+  border-radius: 14px;
+  background: rgba(14, 16, 20, 0.64);
+}
+
+.dashboard-filters .seg-row {
+  gap: 4px;
+}
+
+.dashboard-filters .seg {
+  height: 24px;
+  border-radius: 9px;
+  font-size: 9px;
 }
 
 .field {

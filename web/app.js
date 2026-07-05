@@ -22,6 +22,14 @@ const PRODUCTION_DOMAIN = "tiredllama.co.uk";
 const PRODUCTION_API_URL = "https://api.tiredllama.co.uk";
 const ADD_NEW_STORE = "__add_new_store__";
 const DASHBOARD_ACCENT = "var(--hisense)";
+const BRAND_COLORS = {
+  Hisense: "var(--hisense)",
+  TCL: "#ed1c24",
+  LG: "#a50034",
+  Samsung: "#034ea2",
+  Sony: "#000000",
+  Other: "#cbd5e1"
+};
 
 const KEY = {
   apiUrl: "llamasales.pwa.apiUrl",
@@ -336,13 +344,13 @@ function renderDashboard(account) {
   const stats = dashboardStats(account, state.filters.timeframe, state.filters.scope);
   const sovColor = stats.shareOfValue < 10 ? "var(--red)" : stats.shareOfValue < 20 ? "var(--yellow)" : "var(--green)";
   return `
-    <div class="segmented">
+    <div class="segmented dashboard-filters">
       <div class="seg-row four">${TIMEFRAMES.map((time) => buttonSeg("filter-time", time, shortTime(time), state.filters.timeframe === time)).join("")}</div>
       <div class="seg-row two">${SCOPES.map((scope) => buttonSeg("filter-scope", scope, scope, state.filters.scope === scope)).join("")}</div>
     </div>
 
     <div class="grid">
-      ${kpi("Hisense Share of Value", `${stats.shareOfValue}%`, `${money(stats.hisenseRevenue)} of ${money(stats.totalRevenue)} total value`, sovColor, "span-4 large sov-card", sovGauge(stats.shareOfValue, sovColor))}
+      ${kpi("Hisense Share of Value", `${stats.shareOfValue}%`, `${money(stats.hisenseRevenue)} of ${money(stats.totalRevenue)} total value`, sovColor, "span-4 large sov-card", brandShareBar(stats))}
       ${kpi("Hisense Units", stats.hisenseUnits, `of ${stats.totalUnits} total units across brands`, DASHBOARD_ACCENT, "span-2")}
       ${kpi("Hisense Revenue", money(stats.hisenseRevenue), `vs ${money(stats.totalRevenue)} across all brands`, DASHBOARD_ACCENT, "span-2")}
       ${kpi("Hisense ASP", money(stats.hisenseAsp), "average selling price", DASHBOARD_ACCENT, "span-2")}
@@ -771,21 +779,25 @@ function dashboardStats(account, timeframe, scope) {
     hisenseAsp: 0,
     soundbarRevenue: 0,
     premiumTotalRevenue: 0,
-    premiumRevenue: [0, 0, 0, 0, 0]
+    premiumRevenue: [0, 0, 0, 0, 0],
+    brandRevenue: Object.fromEntries(BRANDS.map((brand) => [brand, 0]))
   };
   for (const sale of state.sales) {
     if (!inScope(sale, account, scope) || !inTimeframe(sale, timeframe)) continue;
+    const saleValue = Number(sale.price || 0);
+    const brand = BRANDS.includes(sale.brand) ? sale.brand : "Other";
     stats.totalUnits += 1;
-    stats.totalRevenue += Number(sale.price || 0);
+    stats.totalRevenue += saleValue;
+    stats.brandRevenue[brand] += saleValue;
     stats.soundbarUnits += Number(sale.soundbarUnits || 0);
     stats.soundbarRevenue += Number(sale.soundbarRevenue || 0);
     if (sale.brand === "Hisense") {
       stats.hisenseUnits += 1;
-      stats.hisenseRevenue += Number(sale.price || 0);
+      stats.hisenseRevenue += saleValue;
       const index = premiumIndex(sale.model);
       if (index >= 0) {
-        stats.premiumRevenue[index] += Number(sale.price || 0);
-        stats.premiumTotalRevenue += Number(sale.price || 0);
+        stats.premiumRevenue[index] += saleValue;
+        stats.premiumTotalRevenue += saleValue;
       }
     }
   }
@@ -976,52 +988,39 @@ function premiumMix(stats) {
   `;
 }
 
-function sovGauge(value, accent) {
-  const score = Math.max(0, Math.min(100, Number(value) || 0));
-  const needle = gaugePoint(score, 76);
-  const marker10 = gaugeMarker(10);
-  const marker20 = gaugeMarker(20);
-  const label10 = gaugePoint(10, 116);
-  const label20 = gaugePoint(20, 116);
+function brandShareBar(stats) {
+  const total = stats.totalRevenue;
+  const segments = BRANDS.map((brand) => {
+    const value = Number(stats.brandRevenue?.[brand] || 0);
+    const pct = total <= 0 ? 0 : (value * 100) / total;
+    return { brand, value, pct, color: brandColor(brand) };
+  });
+  const visibleSegments = segments.filter((item) => item.value > 0);
+  const legendSegments = segments.filter((item) => item.value > 0 || item.brand === "Hisense");
 
   return `
-    <div class="sov-gauge" style="--accent:${accent}">
-      <svg viewBox="0 0 240 142" role="img" aria-label="Hisense share of value gauge at ${score}%">
-        <path class="sov-track" d="${gaugeArc(0, 100)}"></path>
-        ${score > 0 ? `<path class="sov-fill" d="${gaugeArc(0, score)}"></path>` : ""}
-        <line class="sov-threshold" x1="${marker10.inner.x}" y1="${marker10.inner.y}" x2="${marker10.outer.x}" y2="${marker10.outer.y}"></line>
-        <line class="sov-threshold" x1="${marker20.inner.x}" y1="${marker20.inner.y}" x2="${marker20.outer.x}" y2="${marker20.outer.y}"></line>
-        <text class="sov-label" x="${label10.x}" y="${label10.y}">10%</text>
-        <text class="sov-label" x="${label20.x}" y="${label20.y}">20%</text>
-        <line class="sov-needle" x1="120" y1="118" x2="${needle.x}" y2="${needle.y}"></line>
-        <circle class="sov-hub" cx="120" cy="118" r="7"></circle>
-        <text class="sov-end-label" x="28" y="136">0%</text>
-        <text class="sov-end-label" x="212" y="136">100%</text>
-      </svg>
+    <div class="brand-share" aria-label="Brand share of value">
+      <div class="brand-share-bar">
+        ${visibleSegments.length > 0 ? visibleSegments.map(brandShareSegment).join("") : `<span class="brand-share-empty"></span>`}
+      </div>
+      <div class="brand-share-legend">
+        ${legendSegments.map((item) => `<span><i class="swatch" style="background:${item.color}"></i>${esc(item.brand)} ${shareLabel(item.pct)}</span>`).join("")}
+      </div>
     </div>
   `;
 }
 
-function gaugeArc(startPercent, endPercent) {
-  const start = gaugePoint(startPercent, 92);
-  const end = gaugePoint(endPercent, 92);
-  const largeArc = Math.abs(endPercent - startPercent) > 100 ? 1 : 0;
-  return `M ${start.x} ${start.y} A 92 92 0 ${largeArc} 1 ${end.x} ${end.y}`;
+function brandShareSegment(item) {
+  return `<span class="brand-share-segment" style="width:${item.pct.toFixed(4)}%;background:${item.color}" title="${esc(item.brand)} ${shareLabel(item.pct)}" aria-label="${esc(item.brand)} ${shareLabel(item.pct)}"></span>`;
 }
 
-function gaugeMarker(percent) {
-  return {
-    inner: gaugePoint(percent, 78),
-    outer: gaugePoint(percent, 106)
-  };
+function shareLabel(percent) {
+  if (percent > 0 && percent < 1) return `${Math.max(0.1, Math.round(percent * 10) / 10)}%`;
+  return `${Math.round(percent)}%`;
 }
 
-function gaugePoint(percent, radius) {
-  const angle = (180 - (Math.max(0, Math.min(100, percent)) * 1.8)) * Math.PI / 180;
-  return {
-    x: Math.round((120 + radius * Math.cos(angle)) * 10) / 10,
-    y: Math.round((118 - radius * Math.sin(angle)) * 10) / 10
-  };
+function brandColor(brand) {
+  return BRAND_COLORS[brand] || BRAND_COLORS.Other;
 }
 
 function regionCard(region) {
