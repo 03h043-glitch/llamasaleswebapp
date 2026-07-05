@@ -115,6 +115,8 @@ app.addEventListener("change", (event) => {
     refreshRegisterStores(target.form, target.value);
   } else if (target.matches("[data-register-store]")) {
     toggleNewStoreField(target.form, target.value === ADD_NEW_STORE);
+  } else if (target.matches("[data-sale-brand]")) {
+    toggleSaleFields(target.form, target.value === "Hisense");
   }
 });
 
@@ -360,21 +362,21 @@ function renderAddSale(account) {
       </div>
       <div class="field">
         <label>Brand</label>
-        <select name="brand" id="sale-brand">${options(BRANDS, "Hisense")}</select>
+        <select name="brand" id="sale-brand" data-sale-brand required>${optionsWithPlaceholder(BRANDS, "Choose brand")}</select>
       </div>
-      <div class="field">
+      <div class="field" data-hisense-sale-field hidden>
         <label>Hisense Model</label>
-        <select name="model">${options(MODELS, "U7Q")}</select>
+        <select name="model">${optionsWithPlaceholder(MODELS, "Choose model")}</select>
       </div>
-      <div class="field">
+      <div class="field" data-hisense-sale-field hidden>
         <label>Screen Size</label>
-        <select name="size">${options(SIZES, "55")}</select>
+        <select name="size">${optionsWithPlaceholder(SIZES, "Choose size")}</select>
       </div>
       <div class="field">
         <label>Sale Value</label>
         <input name="price" inputmode="decimal" placeholder="Example: 799" required>
       </div>
-      <div class="field">
+      <div class="field" data-hisense-sale-field hidden>
         <label>Soundbar Value</label>
         <input name="soundbarRevenue" inputmode="decimal" placeholder="Leave blank if none">
       </div>
@@ -563,7 +565,11 @@ async function saveSale(data) {
     return;
   }
   const isHisense = brand === "Hisense";
-  const soundbarRevenue = Number(data.soundbarRevenue || 0);
+  if (isHisense && (!data.model || !data.size)) {
+    toast("Choose the Hisense model and screen size.");
+    return;
+  }
+  const soundbarRevenue = isHisense ? Number(data.soundbarRevenue || 0) : 0;
   const sale = {
     id: randomId(),
     date: todayIso(),
@@ -1081,6 +1087,17 @@ function toggleNewStoreField(form, show) {
   if (show) setTimeout(() => input.scrollIntoView({ block: "center", behavior: "smooth" }), 60);
 }
 
+function toggleSaleFields(form, showHisense) {
+  if (!form) return;
+  form.querySelectorAll("[data-hisense-sale-field]").forEach((field) => {
+    field.hidden = !showHisense;
+    field.querySelectorAll("input, select").forEach((input) => {
+      input.required = showHisense && (input.name === "model" || input.name === "size");
+      if (!showHisense) input.value = "";
+    });
+  });
+}
+
 function registerStoreOptions(region) {
   const stores = storesForRegion(region);
   const existing = stores.map((store) => `<option value="${esc(store)}">${esc(store)}</option>`).join("");
@@ -1100,6 +1117,10 @@ function storesForRegion(region) {
 
 function options(values, selected) {
   return values.map((value) => `<option ${value === selected ? "selected" : ""}>${esc(value)}</option>`).join("");
+}
+
+function optionsWithPlaceholder(values, placeholder) {
+  return `<option value="">${esc(placeholder)}</option>${values.map((value) => `<option value="${esc(value)}">${esc(value)}</option>`).join("")}`;
 }
 
 function toast(message) {
