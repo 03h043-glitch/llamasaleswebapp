@@ -300,12 +300,24 @@ h3 {
 
 .brand-share-arc-segment {
   stroke-linecap: butt;
+  filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.34));
 }
 
 .brand-share-cap {
   stroke: rgba(255, 255, 255, 0.16);
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.34));
+}
+
+.brand-share-highlight {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.18);
+  stroke-linecap: round;
+  stroke-width: 4;
+  transform: translateY(-4px);
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
 }
 
 .brand-share-threshold {

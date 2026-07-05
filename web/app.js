@@ -23,7 +23,7 @@ const PRODUCTION_API_URL = "https://api.tiredllama.co.uk";
 const ADD_NEW_STORE = "__add_new_store__";
 const DASHBOARD_ACCENT = "var(--hisense)";
 const BRAND_COLORS = {
-  Hisense: "var(--hisense)",
+  Hisense: "#00aaa6",
   TCL: "#ed1c24",
   LG: "#a50034",
   Samsung: "#034ea2",
@@ -36,6 +36,7 @@ const KEY = {
   users: "llamasales.pwa.users",
   sales: "llamasales.pwa.sales",
   rates: "llamasales.pwa.rates",
+  meta: "llamasales.pwa.meta",
   session: "llamasales.pwa.session",
   asmHash: "llamasales.pwa.asmHash",
   lastSync: "llamasales.pwa.lastSync"
@@ -52,7 +53,7 @@ const state = {
   sales: readJson(KEY.sales, []),
   rates: readJson(KEY.rates, {}),
   session: readJson(KEY.session, null),
-  meta: { regions: REGIONS, storesByRegion: {} },
+  meta: readJson(KEY.meta, { regions: REGIONS, storesByRegion: {}, models: MODELS, sizes: SIZES }),
   filters: { timeframe: "Today", scope: "Store" },
   toast: ""
 };
@@ -376,11 +377,11 @@ function renderAddSale(account) {
       </div>
       <div class="field" data-hisense-sale-field hidden>
         <label>Hisense Model</label>
-        <select name="model">${optionsWithPlaceholder(MODELS, "Choose model")}</select>
+        <select name="model">${optionsWithPlaceholder(modelOptions(), "Choose model")}</select>
       </div>
       <div class="field" data-hisense-sale-field hidden>
         <label>Screen Size</label>
-        <select name="size">${optionsWithPlaceholder(SIZES, "Choose size")}</select>
+        <select name="size">${optionsWithPlaceholder(sizeOptions(), "Choose size")}</select>
       </div>
       <div class="field">
         <label>Sale Value</label>
@@ -475,8 +476,8 @@ function renderCommissionConfig() {
     <form class="card stack" data-form="rate">
       <h2>Commission Config</h2>
       <p class="muted">Set paid commission by Hisense model and size.</p>
-      <div class="field"><label>Model</label><select name="model">${options(MODELS, "U7Q")}</select></div>
-      <div class="field"><label>Size</label><select name="size">${options(SIZES, "55")}</select></div>
+      <div class="field"><label>Model</label><select name="model">${options(modelOptions(), "U7Q")}</select></div>
+      <div class="field"><label>Size</label><select name="size">${options(sizeOptions(), "55")}</select></div>
       <div class="field"><label>Commission Value</label><input name="value" inputmode="decimal" placeholder="Example: 15" required></div>
       <button class="button">Save Rate</button>
       <p class="muted">If a backend URL is configured, this saves to the laptop backend and syncs back.</p>
@@ -768,6 +769,30 @@ function applyMetaPayload(meta) {
   if (meta.storesByRegion && typeof meta.storesByRegion === "object") {
     state.meta.storesByRegion = meta.storesByRegion;
   }
+  if (Array.isArray(meta.models)) {
+    state.meta.models = cleanOptions(meta.models, MODELS);
+  }
+  if (Array.isArray(meta.sizes)) {
+    state.meta.sizes = cleanOptions(meta.sizes, SIZES);
+  }
+  writeJson(KEY.meta, state.meta);
+}
+
+function modelOptions() {
+  return cleanOptions(state.meta.models, MODELS);
+}
+
+function sizeOptions() {
+  return cleanOptions(state.meta.sizes, SIZES);
+}
+
+function cleanOptions(values, fallback) {
+  const clean = [];
+  for (const value of Array.isArray(values) ? values : []) {
+    const text = String(value || "").trim();
+    if (text && !clean.some((item) => item.toLowerCase() === text.toLowerCase())) clean.push(text);
+  }
+  return clean.length ? clean : fallback;
 }
 
 function dashboardStats(account, timeframe, scope) {
@@ -952,9 +977,8 @@ async function shareDashboard() {
   const account = currentAccount();
   if (!account) return;
   toast("Preparing dashboard image...");
-  const capture = createDashboardCaptureTarget(account);
   try {
-    const file = await dashboardImageFile(capture.element);
+    const file = await dashboardImageFile(account);
     const sharePayload = {
       title: "LlamaSales dashboard",
       text: "LlamaSales dashboard",
@@ -982,111 +1006,23 @@ async function shareDashboard() {
   } catch (error) {
     console.error(error);
     toast("Could not create dashboard image.");
-  } finally {
-    capture.cleanup();
   }
 }
 
-function createDashboardCaptureTarget(account) {
-  const visible = document.querySelector(".dashboard-card-crop");
-  if (visible) return { element: visible, cleanup: () => {} };
-
-  const width = Math.round(document.querySelector(".content")?.getBoundingClientRect().width || Math.min(window.innerWidth - 28, 420));
-  const host = document.createElement("div");
-  host.className = "share-capture-host";
-  host.style.cssText = `position:fixed;left:-10000px;top:0;width:${width}px;pointer-events:none;opacity:0;`;
-  host.innerHTML = renderDashboard(account);
-  document.body.appendChild(host);
-  return {
-    element: host.querySelector(".dashboard-card-crop"),
-    cleanup: () => host.remove()
-  };
-}
-
-async function dashboardImageFile(element) {
-  if (!element) throw new Error("Dashboard capture target missing");
+async function dashboardImageFile(account) {
   if (document.fonts?.ready) await document.fonts.ready;
-
-  const rect = element.getBoundingClientRect();
-  const width = Math.ceil(rect.width);
-  const height = Math.ceil(element.scrollHeight || rect.height);
+  const stats = dashboardStats(account, state.filters.timeframe, state.filters.scope);
+  const layout = dashboardShareLayout();
   const scale = Math.min(3, Math.max(2, window.devicePixelRatio || 2));
-  const svg = dashboardCaptureSvg(element, width, height);
-  const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }));
-
-  try {
-    const image = await loadImage(url);
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.ceil(width * scale);
-    canvas.height = Math.ceil(height * scale);
-    const context = canvas.getContext("2d");
-    context.scale(scale, scale);
-    context.drawImage(image, 0, 0, width, height);
-    const blob = await canvasBlob(canvas);
-    return new File([blob], `llamasales-dashboard-${todayIso()}.png`, { type: "image/png" });
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
-
-function dashboardCaptureSvg(element, width, height) {
-  const clone = element.cloneNode(true);
-  clone.classList.add("share-crop-clone");
-  const css = collectCaptureCss();
-  const vars = captureCssVariables();
-  const html = clone.outerHTML;
-  return `
-    <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
-      <foreignObject width="100%" height="100%">
-        <div xmlns="http://www.w3.org/1999/xhtml" class="share-canvas-root" style="${vars} width:${width}px; min-height:${height}px;">
-          <style>${css}</style>
-          ${html}
-        </div>
-      </foreignObject>
-    </svg>
-  `;
-}
-
-function collectCaptureCss() {
-  const blocks = [];
-  for (const sheet of Array.from(document.styleSheets)) {
-    try {
-      blocks.push(Array.from(sheet.cssRules).map((rule) => rule.cssText).join("\n"));
-    } catch (error) {
-      // Cross-origin styles are skipped; this app's capture styles are same-origin.
-    }
-  }
-  blocks.push(`
-    .share-canvas-root {
-      margin: 0;
-      background: #05030a;
-      color: #ffffff;
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    }
-    .share-crop-clone {
-      margin: 0;
-    }
-  `);
-  return blocks.join("\n").replace(/<\/style/gi, "<\\/style");
-}
-
-function captureCssVariables() {
-  const styles = getComputedStyle(document.documentElement);
-  const names = [
-    "--bg", "--panel", "--card", "--card-strong", "--field", "--stroke", "--field-stroke",
-    "--ink", "--muted", "--subtle", "--hisense", "--green", "--yellow", "--red",
-    "--blue", "--violet", "--orange", "--cyan", "--teal", "--gold", "--blood", "--laser"
-  ];
-  return names.map((name) => `${name}:${styles.getPropertyValue(name).trim()};`).join("");
-}
-
-function loadImage(url) {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = reject;
-    image.src = url;
-  });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.ceil(layout.width * scale);
+  canvas.height = Math.ceil(layout.height * scale);
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Canvas is unavailable");
+  context.scale(scale, scale);
+  drawDashboardShareImage(context, layout, stats);
+  const blob = await canvasBlob(canvas);
+  return new File([blob], `llamasales-dashboard-${todayIso()}.png`, { type: "image/png" });
 }
 
 function canvasBlob(canvas) {
@@ -1107,6 +1043,278 @@ function downloadFile(file) {
   link.click();
   link.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function dashboardShareLayout() {
+  const visible = document.querySelector(".dashboard-card-crop");
+  const measured = visible?.getBoundingClientRect().width || document.querySelector(".content")?.getBoundingClientRect().width || window.innerWidth - 28;
+  const width = Math.round(Math.max(340, Math.min(720, measured)));
+  const gap = 10;
+  const half = (width - gap) / 2;
+  const sovHeight = 258;
+  const smallHeight = 122;
+  const premiumHeight = 116;
+  const height = sovHeight + gap + smallHeight + gap + smallHeight + gap + premiumHeight;
+  return { width, height, gap, half, sovHeight, smallHeight, premiumHeight };
+}
+
+function drawDashboardShareImage(ctx, layout, stats) {
+  ctx.clearRect(0, 0, layout.width, layout.height);
+  const sovColor = stats.shareOfValue < 10 ? "#ec4a4a" : stats.shareOfValue < 20 ? "#f5b232" : "#1cb973";
+  let y = 0;
+  drawShareCard(ctx, 0, y, layout.width, layout.sovHeight, sovColor);
+  drawShareText(ctx, "Hisense Share of Value", 14, y + 28, 12, "#9dabc0", 800);
+  drawShareText(ctx, `${stats.shareOfValue}%`, 14, y + 78, 46, sovColor, 900);
+  drawShareText(ctx, `${money(stats.hisenseRevenue)} of ${money(stats.totalRevenue)} total value`, 14, y + 104, 12, "#9dabc0", 500);
+  drawShareGauge(ctx, stats, layout.width / 2, y + 120, Math.min(layout.width - 34, 360), sovColor);
+
+  y += layout.sovHeight + layout.gap;
+  drawShareKpi(ctx, 0, y, layout.half, layout.smallHeight, "Hisense Units", String(stats.hisenseUnits), `of ${stats.totalUnits} total units across brands`, "#00aaa6");
+  drawShareKpi(ctx, layout.half + layout.gap, y, layout.half, layout.smallHeight, "Hisense Revenue", money(stats.hisenseRevenue), `vs ${money(stats.totalRevenue)} across all brands`, "#00aaa6");
+
+  y += layout.smallHeight + layout.gap;
+  drawShareKpi(ctx, 0, y, layout.half, layout.smallHeight, "Hisense ASP", money(stats.hisenseAsp), "average selling price", "#00aaa6");
+  drawShareKpi(ctx, layout.half + layout.gap, y, layout.half, layout.smallHeight, "Soundbar Sales", String(stats.soundbarUnits), `${money(stats.soundbarRevenue)} soundbar value`, "#00aaa6");
+
+  y += layout.smallHeight + layout.gap;
+  drawSharePremium(ctx, 0, y, layout.width, layout.premiumHeight, stats);
+}
+
+function drawShareKpi(ctx, x, y, width, height, title, value, subtitleText, accent) {
+  drawShareCard(ctx, x, y, width, height, accent);
+  drawShareText(ctx, title, x + 14, y + 29, 12, "#9dabc0", 800);
+  drawShareText(ctx, value, x + 14, y + 67, 29, accent, 900, width - 28);
+  drawShareText(ctx, subtitleText, x + 14, y + 92, 12, "#9dabc0", 500, width - 28);
+}
+
+function drawSharePremium(ctx, x, y, width, height, stats) {
+  drawShareCard(ctx, x, y, width, height, "#00aaa6");
+  drawShareText(ctx, "Premium Mix", x + 14, y + 29, 17, "#ffffff", 800);
+  drawShareText(ctx, "Hisense value by category", x + 130, y + 29, 12, "#9dabc0", 500);
+
+  const total = stats.premiumTotalRevenue;
+  const segments = PREMIUM.map((cat, index) => {
+    const value = stats.premiumRevenue[index];
+    const pct = total <= 0 ? 0 : Math.round((value * 100) / total);
+    return { ...cat, value, pct, color: cssColorValue(cat.color) };
+  });
+  const barX = x + 14;
+  const barY = y + 48;
+  const barW = width - 28;
+  const barH = 22;
+  ctx.save();
+  roundedRect(ctx, barX, barY, barW, barH, 11);
+  ctx.fillStyle = "rgba(11,13,17,0.9)";
+  ctx.fill();
+  ctx.clip();
+  let cursor = barX;
+  if (total <= 0) {
+    ctx.fillStyle = "rgba(92,108,130,0.45)";
+    ctx.fillRect(barX, barY, barW, barH);
+  } else {
+    for (const item of segments.filter((segment) => segment.value > 0)) {
+      const segW = item.pct * barW / 100;
+      ctx.fillStyle = item.color;
+      ctx.fillRect(cursor, barY, segW, barH);
+      cursor += segW;
+    }
+  }
+  ctx.restore();
+
+  const legendY = y + 92;
+  const colW = barW / 5;
+  segments.forEach((item, index) => {
+    const lx = barX + index * colW;
+    ctx.fillStyle = item.color;
+    roundedRect(ctx, lx, legendY - 8, 9, 9, 3);
+    ctx.fill();
+    drawShareText(ctx, `${item.label} ${item.pct}%`, lx + 14, legendY, 10, "#9dabc0", 800, colW - 16);
+  });
+}
+
+function drawShareGauge(ctx, stats, centerX, top, width, accent) {
+  const scale = width / 240;
+  const centerY = top + 118 * scale;
+  const radius = 92 * scale;
+  const lineWidth = 16 * scale;
+  ctx.save();
+  ctx.lineWidth = lineWidth;
+  ctx.lineCap = "round";
+  ctx.strokeStyle = "rgba(33,38,49,0.92)";
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, radius, percentAngle(0), percentAngle(100), true);
+  ctx.stroke();
+
+  const arcSegments = brandArcSegments(stats);
+  for (const item of arcSegments) {
+    ctx.lineCap = "butt";
+    ctx.strokeStyle = shareArcGradient(ctx, item.color, centerY - radius, centerY + lineWidth);
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, radius, percentAngle(item.start), percentAngle(item.end), true);
+    ctx.stroke();
+  }
+  const firstArc = arcSegments[0];
+  const lastArc = arcSegments[arcSegments.length - 1];
+  if (firstArc) drawShareGaugeCap(ctx, firstArc.start, firstArc.color, centerX, centerY, radius, lineWidth / 2);
+  if (lastArc) drawShareGaugeCap(ctx, lastArc.end, lastArc.color, centerX, centerY, radius, lineWidth / 2);
+
+  drawShareGaugeMarker(ctx, 10, centerX, centerY, scale);
+  drawShareGaugeMarker(ctx, 20, centerX, centerY, scale);
+  drawShareGaugeLabel(ctx, "10%", 10, centerX, centerY, 116 * scale);
+  drawShareGaugeLabel(ctx, "20%", 20, centerX, centerY, 116 * scale);
+  drawShareGaugeLabel(ctx, "0%", 0, centerX, centerY, 112 * scale, 18 * scale);
+  drawShareGaugeLabel(ctx, "100%", 100, centerX, centerY, 112 * scale, 18 * scale);
+
+  const needle = gaugeCanvasPoint(stats.shareOfValue, centerX, centerY, 76 * scale);
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 4 * scale;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(centerX, centerY);
+  ctx.lineTo(needle.x, needle.y);
+  ctx.stroke();
+  ctx.fillStyle = accent;
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, 7 * scale, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.78)";
+  ctx.lineWidth = 2 * scale;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawShareGaugeCap(ctx, percent, color, centerX, centerY, radius, capRadius) {
+  const point = gaugeCanvasPoint(percent, centerX, centerY, radius);
+  ctx.fillStyle = shareArcGradient(ctx, color, point.y - capRadius, point.y + capRadius);
+  ctx.beginPath();
+  ctx.arc(point.x, point.y, capRadius, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawShareGaugeMarker(ctx, percent, centerX, centerY, scale) {
+  const inner = gaugeCanvasPoint(percent, centerX, centerY, 78 * scale);
+  const outer = gaugeCanvasPoint(percent, centerX, centerY, 106 * scale);
+  ctx.strokeStyle = "rgba(255,255,255,0.88)";
+  ctx.lineWidth = 2.5 * scale;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(inner.x, inner.y);
+  ctx.lineTo(outer.x, outer.y);
+  ctx.stroke();
+}
+
+function drawShareGaugeLabel(ctx, label, percent, centerX, centerY, radius, yOffset = 0) {
+  const point = gaugeCanvasPoint(percent, centerX, centerY, radius);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  drawShareText(ctx, label, point.x, point.y + yOffset, 10, "#9dabc0", 900);
+  ctx.textAlign = "start";
+}
+
+function drawShareCard(ctx, x, y, width, height, accent) {
+  ctx.save();
+  roundedRect(ctx, x, y, width, height, 14);
+  const fill = ctx.createLinearGradient(x, y, x + width, y + height);
+  fill.addColorStop(0, hexToRgba(accent, 0.18));
+  fill.addColorStop(0.46, "rgba(24,27,34,0.88)");
+  fill.addColorStop(1, "rgba(18,20,27,0.88)");
+  ctx.fillStyle = fill;
+  ctx.fill();
+  ctx.strokeStyle = hexToRgba(accent, 0.62);
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawShareText(ctx, text, x, y, size, color, weight = 500, maxWidth = 0) {
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.font = `${weight} ${size}px Inter, Segoe UI, Arial, sans-serif`;
+  ctx.textBaseline = "alphabetic";
+  const output = maxWidth ? fitCanvasText(ctx, String(text), maxWidth) : String(text);
+  ctx.fillText(output, x, y);
+  ctx.restore();
+}
+
+function fitCanvasText(ctx, text, maxWidth) {
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  let output = text;
+  while (output.length > 1 && ctx.measureText(`${output}...`).width > maxWidth) {
+    output = output.slice(0, -1);
+  }
+  return `${output}...`;
+}
+
+function roundedRect(ctx, x, y, width, height, radius) {
+  const r = Math.min(radius, width / 2, height / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + width - r, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  ctx.lineTo(x + r, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+}
+
+function percentAngle(percent) {
+  return -((180 - (Math.max(0, Math.min(100, percent)) * 1.8)) * Math.PI / 180);
+}
+
+function gaugeCanvasPoint(percent, centerX, centerY, radius) {
+  const angle = (180 - (Math.max(0, Math.min(100, percent)) * 1.8)) * Math.PI / 180;
+  return {
+    x: centerX + radius * Math.cos(angle),
+    y: centerY - radius * Math.sin(angle)
+  };
+}
+
+function shareArcGradient(ctx, color, top, bottom) {
+  const gradient = ctx.createLinearGradient(0, top, 0, bottom);
+  gradient.addColorStop(0, adjustHex(color, 34));
+  gradient.addColorStop(0.48, color);
+  gradient.addColorStop(1, adjustHex(color, -42));
+  return gradient;
+}
+
+function cssColorValue(value) {
+  if (value === "var(--cyan)") return "#22d3ee";
+  if (value === "var(--teal)") return "#14b8a6";
+  if (value === "var(--gold)") return "#f5bc42";
+  if (value === "var(--blood)") return "#b21c2d";
+  if (value === "var(--laser)") return "#c4b5fd";
+  return value;
+}
+
+function hexToRgba(hex, alpha) {
+  const rgb = hexToRgb(hex);
+  return `rgba(${rgb.r},${rgb.g},${rgb.b},${alpha})`;
+}
+
+function adjustHex(hex, amount) {
+  const rgb = hexToRgb(hex);
+  return rgbToHex(clampColor(rgb.r + amount), clampColor(rgb.g + amount), clampColor(rgb.b + amount));
+}
+
+function hexToRgb(hex) {
+  const clean = String(hex || "#000000").replace("#", "");
+  const value = clean.length === 3 ? clean.split("").map((char) => char + char).join("") : clean.padEnd(6, "0").slice(0, 6);
+  const parsed = Number.parseInt(value, 16);
+  return {
+    r: (parsed >> 16) & 255,
+    g: (parsed >> 8) & 255,
+    b: parsed & 255
+  };
+}
+
+function rgbToHex(r, g, b) {
+  return `#${[r, g, b].map((value) => value.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function clampColor(value) {
+  return Math.max(0, Math.min(255, Math.round(value)));
 }
 
 function subtitle(account) {
@@ -1139,24 +1347,9 @@ function premiumMix(stats) {
 }
 
 function brandShareBar(stats) {
-  const total = stats.totalRevenue;
-  const segments = BRANDS.map((brand) => {
-    const value = Number(stats.brandRevenue?.[brand] || 0);
-    const pct = total <= 0 ? 0 : (value * 100) / total;
-    return { brand, value, pct, color: brandColor(brand) };
-  });
-  const visibleSegments = segments.filter((item) => item.value > 0);
+  const segments = orderedBrandSegments(stats);
   const legendSegments = segments.filter((item) => item.value > 0 || item.brand === "Hisense");
-  const arcSegments = [];
-  let cursor = 0;
-
-  visibleSegments.forEach((item, index) => {
-    const start = cursor;
-    const end = index === visibleSegments.length - 1 ? 100 : Math.min(100, cursor + item.pct);
-    cursor = end;
-    if (end > start) arcSegments.push({ ...item, start, end });
-  });
-
+  const arcSegments = brandArcSegments(stats);
   const firstArc = arcSegments[0];
   const lastArc = arcSegments[arcSegments.length - 1];
   const score = Math.max(0, Math.min(100, Number(stats.shareOfValue) || 0));
@@ -1170,10 +1363,14 @@ function brandShareBar(stats) {
     <div class="brand-share" aria-label="Brand share of value">
       <div class="brand-share-gauge">
         <svg viewBox="0 0 240 148" role="img" aria-label="Hisense share of value at ${score}% with brand value mix">
+          <defs>
+            ${arcSegments.map(brandShareGradient).join("")}
+          </defs>
           <path class="brand-share-track" d="${gaugeArc(0, 100)}"></path>
           ${arcSegments.map(brandShareArcSegment).join("")}
           ${firstArc ? brandShareCap(firstArc, "start") : ""}
           ${lastArc ? brandShareCap(lastArc, "end") : ""}
+          <path class="brand-share-highlight" d="${gaugeArc(0, 100)}"></path>
           <line class="brand-share-threshold" x1="${marker10.inner.x}" y1="${marker10.inner.y}" x2="${marker10.outer.x}" y2="${marker10.outer.y}"></line>
           <line class="brand-share-threshold" x1="${marker20.inner.x}" y1="${marker20.inner.y}" x2="${marker20.outer.x}" y2="${marker20.outer.y}"></line>
           <text class="brand-share-label" x="${label10.x}" y="${label10.y}">10%</text>
@@ -1192,12 +1389,22 @@ function brandShareBar(stats) {
 }
 
 function brandShareArcSegment(item) {
-  return `<path class="brand-share-arc-segment" d="${gaugeArc(item.start, item.end)}" stroke="${item.color}" aria-label="${esc(item.brand)} ${shareLabel(item.pct)}"></path>`;
+  return `<path class="brand-share-arc-segment" d="${gaugeArc(item.start, item.end)}" stroke="url(#${item.gradientId})" aria-label="${esc(item.brand)} ${shareLabel(item.pct)}"></path>`;
 }
 
 function brandShareCap(item, position) {
   const point = gaugePoint(position === "start" ? item.start : item.end, 92);
-  return `<circle class="brand-share-cap" cx="${point.x}" cy="${point.y}" r="8" fill="${item.color}"></circle>`;
+  return `<circle class="brand-share-cap" cx="${point.x}" cy="${point.y}" r="8" fill="url(#${item.gradientId})"></circle>`;
+}
+
+function brandShareGradient(item) {
+  return `
+    <linearGradient id="${item.gradientId}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="${adjustHex(item.color, 34)}"></stop>
+      <stop offset="48%" stop-color="${item.color}"></stop>
+      <stop offset="100%" stop-color="${adjustHex(item.color, -42)}"></stop>
+    </linearGradient>
+  `;
 }
 
 function shareLabel(percent) {
@@ -1207,6 +1414,35 @@ function shareLabel(percent) {
 
 function brandColor(brand) {
   return BRAND_COLORS[brand] || BRAND_COLORS.Other;
+}
+
+function orderedBrandSegments(stats) {
+  const total = stats.totalRevenue;
+  const segments = BRANDS.map((brand) => {
+    const value = Number(stats.brandRevenue?.[brand] || 0);
+    const pct = total <= 0 ? 0 : (value * 100) / total;
+    return { brand, value, pct, color: brandColor(brand) };
+  });
+  const hisense = segments.find((item) => item.brand === "Hisense");
+  const others = segments
+    .filter((item) => item.brand !== "Hisense")
+    .sort((left, right) => right.pct - left.pct || BRANDS.indexOf(left.brand) - BRANDS.indexOf(right.brand));
+  return [hisense, ...others].filter(Boolean);
+}
+
+function brandArcSegments(stats) {
+  const visibleSegments = orderedBrandSegments(stats).filter((item) => item.value > 0);
+  const arcSegments = [];
+  let cursor = 0;
+
+  visibleSegments.forEach((item, index) => {
+    const start = cursor;
+    const end = index === visibleSegments.length - 1 ? 100 : Math.min(100, cursor + item.pct);
+    cursor = end;
+    if (end > start) arcSegments.push({ ...item, start, end, gradientId: `brand-share-gradient-${index}` });
+  });
+
+  return arcSegments;
 }
 
 function gaugeArc(startPercent, endPercent) {
