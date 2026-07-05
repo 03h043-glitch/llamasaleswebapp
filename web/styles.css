@@ -53,7 +53,7 @@ button {
 
 .app {
   min-height: 100vh;
-  padding: env(safe-area-inset-top) 14px calc(96px + env(safe-area-inset-bottom));
+  padding: env(safe-area-inset-top) 14px calc(18px + env(safe-area-inset-bottom));
 }
 
 .topbar {
@@ -150,6 +150,12 @@ button {
 .content {
   max-width: 960px;
   margin: 0 auto;
+}
+
+.content::after {
+  content: "";
+  display: block;
+  height: calc(152px + env(safe-area-inset-bottom));
 }
 
 .auth-shell {
@@ -251,6 +257,75 @@ h3 {
   color: var(--muted);
   font-size: 12px;
   margin-top: 5px;
+}
+
+.sov-card {
+  min-height: 258px;
+}
+
+.sov-gauge {
+  width: min(100%, 360px);
+  margin: 16px auto 0;
+}
+
+.sov-gauge svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.sov-track,
+.sov-arc {
+  fill: none;
+  stroke-linecap: round;
+  stroke-width: 16;
+  vector-effect: non-scaling-stroke;
+}
+
+.sov-track {
+  stroke: rgba(92, 108, 130, 0.34);
+}
+
+.sov-red {
+  stroke: var(--red);
+}
+
+.sov-yellow {
+  stroke: var(--yellow);
+}
+
+.sov-green {
+  stroke: var(--green);
+}
+
+.sov-threshold {
+  stroke: rgba(255, 255, 255, 0.86);
+  stroke-linecap: round;
+  stroke-width: 2.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.sov-needle {
+  stroke: var(--accent);
+  stroke-linecap: round;
+  stroke-width: 4;
+  vector-effect: non-scaling-stroke;
+}
+
+.sov-hub {
+  fill: var(--accent);
+  stroke: rgba(255, 255, 255, 0.8);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.sov-label,
+.sov-end-label {
+  fill: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  text-anchor: middle;
 }
 
 .progress {

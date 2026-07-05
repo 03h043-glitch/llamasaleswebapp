@@ -21,6 +21,7 @@ const OTHER_HISENSE_COMMISSION = 5;
 const PRODUCTION_DOMAIN = "tiredllama.co.uk";
 const PRODUCTION_API_URL = "https://api.tiredllama.co.uk";
 const ADD_NEW_STORE = "__add_new_store__";
+const DASHBOARD_ACCENT = "var(--hisense)";
 
 const KEY = {
   apiUrl: "llamasales.pwa.apiUrl",
@@ -339,11 +340,11 @@ function renderDashboard(account) {
     </div>
 
     <div class="grid">
-      ${kpi("Hisense Share of Value", `${stats.shareOfValue}%`, `${money(stats.hisenseRevenue)} of ${money(stats.totalRevenue)} total value`, sovColor, "span-4 large", `<div class="progress" style="--accent:${sovColor}"><span style="--value:${Math.max(0, Math.min(100, stats.shareOfValue))}%"></span></div>`)}
-      ${kpi("Hisense Units", stats.hisenseUnits, `of ${stats.totalUnits} total units across brands`, "var(--hisense)", "span-2")}
-      ${kpi("Hisense Revenue", money(stats.hisenseRevenue), `vs ${money(stats.totalRevenue)} across all brands`, "var(--green)", "span-2")}
-      ${kpi("Hisense ASP", money(stats.hisenseAsp), "average selling price", "var(--blue)", "span-2")}
-      ${kpi("Soundbar Sales", stats.soundbarUnits, `${money(stats.soundbarRevenue)} soundbar value`, "var(--orange)", "span-2")}
+      ${kpi("Hisense Share of Value", `${stats.shareOfValue}%`, `${money(stats.hisenseRevenue)} of ${money(stats.totalRevenue)} total value`, sovColor, "span-4 large sov-card", sovGauge(stats.shareOfValue, sovColor))}
+      ${kpi("Hisense Units", stats.hisenseUnits, `of ${stats.totalUnits} total units across brands`, DASHBOARD_ACCENT, "span-2")}
+      ${kpi("Hisense Revenue", money(stats.hisenseRevenue), `vs ${money(stats.totalRevenue)} across all brands`, DASHBOARD_ACCENT, "span-2")}
+      ${kpi("Hisense ASP", money(stats.hisenseAsp), "average selling price", DASHBOARD_ACCENT, "span-2")}
+      ${kpi("Soundbar Sales", stats.soundbarUnits, `${money(stats.soundbarRevenue)} soundbar value`, DASHBOARD_ACCENT, "span-2")}
     </div>
 
     ${premiumMix(stats)}
@@ -967,6 +968,56 @@ function premiumMix(stats) {
       </div>
     </section>
   `;
+}
+
+function sovGauge(value, accent) {
+  const score = Math.max(0, Math.min(100, Number(value) || 0));
+  const needle = gaugePoint(score, 76);
+  const marker10 = gaugeMarker(10);
+  const marker20 = gaugeMarker(20);
+  const label10 = gaugePoint(10, 116);
+  const label20 = gaugePoint(20, 116);
+
+  return `
+    <div class="sov-gauge" style="--accent:${accent}">
+      <svg viewBox="0 0 240 142" role="img" aria-label="Hisense share of value gauge at ${score}%">
+        <path class="sov-track" d="${gaugeArc(0, 100)}"></path>
+        <path class="sov-arc sov-red" d="${gaugeArc(0, 10)}"></path>
+        <path class="sov-arc sov-yellow" d="${gaugeArc(10, 20)}"></path>
+        <path class="sov-arc sov-green" d="${gaugeArc(20, 100)}"></path>
+        <line class="sov-threshold" x1="${marker10.inner.x}" y1="${marker10.inner.y}" x2="${marker10.outer.x}" y2="${marker10.outer.y}"></line>
+        <line class="sov-threshold" x1="${marker20.inner.x}" y1="${marker20.inner.y}" x2="${marker20.outer.x}" y2="${marker20.outer.y}"></line>
+        <text class="sov-label" x="${label10.x}" y="${label10.y}">10%</text>
+        <text class="sov-label" x="${label20.x}" y="${label20.y}">20%</text>
+        <line class="sov-needle" x1="120" y1="118" x2="${needle.x}" y2="${needle.y}"></line>
+        <circle class="sov-hub" cx="120" cy="118" r="7"></circle>
+        <text class="sov-end-label" x="28" y="136">0%</text>
+        <text class="sov-end-label" x="212" y="136">100%</text>
+      </svg>
+    </div>
+  `;
+}
+
+function gaugeArc(startPercent, endPercent) {
+  const start = gaugePoint(startPercent, 92);
+  const end = gaugePoint(endPercent, 92);
+  const largeArc = Math.abs(endPercent - startPercent) > 100 ? 1 : 0;
+  return `M ${start.x} ${start.y} A 92 92 0 ${largeArc} 0 ${end.x} ${end.y}`;
+}
+
+function gaugeMarker(percent) {
+  return {
+    inner: gaugePoint(percent, 78),
+    outer: gaugePoint(percent, 106)
+  };
+}
+
+function gaugePoint(percent, radius) {
+  const angle = (180 - (Math.max(0, Math.min(100, percent)) * 1.8)) * Math.PI / 180;
+  return {
+    x: Math.round((120 + radius * Math.cos(angle)) * 10) / 10,
+    y: Math.round((118 - radius * Math.sin(angle)) * 10) / 10
+  };
 }
 
 function regionCard(region) {
