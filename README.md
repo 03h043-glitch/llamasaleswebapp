@@ -36,7 +36,7 @@ The backend is not hosted by Cloudflare Workers. Keep running the local Windows 
 
 Current local backend executable in the project files:
 
-`LlamaSalesBackend-v2.exe`
+`LlamaSalesBackend-v3.exe`
 
 ## Local Frontend Test
 

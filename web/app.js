@@ -20,6 +20,7 @@ const DEFAULT_COMMISSION = [5, 8, 15, 25, 35];
 const OTHER_HISENSE_COMMISSION = 5;
 const PRODUCTION_DOMAIN = "tiredllama.co.uk";
 const PRODUCTION_API_URL = "https://api.tiredllama.co.uk";
+const ADD_NEW_STORE = "__add_new_store__";
 
 const KEY = {
   apiUrl: "llamasales.pwa.apiUrl",
@@ -33,6 +34,7 @@ const KEY = {
 
 const state = {
   page: "dashboard",
+  authMode: "login",
   menuOpen: false,
   asmUnlocked: false,
   syncInProgress: false,
@@ -41,6 +43,7 @@ const state = {
   sales: readJson(KEY.sales, []),
   rates: readJson(KEY.rates, {}),
   session: readJson(KEY.session, null),
+  meta: { regions: REGIONS, storesByRegion: {} },
   filters: { timeframe: "Today", scope: "Store" },
   toast: ""
 };
@@ -52,6 +55,7 @@ if ("serviceWorker" in navigator) {
 }
 
 render();
+loadMeta();
 syncDaily();
 
 app.addEventListener("click", async (event) => {
@@ -62,6 +66,9 @@ app.addEventListener("click", async (event) => {
 
   if (action === "menu") {
     state.menuOpen = true;
+    render();
+  } else if (action === "auth-mode") {
+    state.authMode = value === "register" ? "register" : "login";
     render();
   } else if (action === "close-menu") {
     state.menuOpen = false;
@@ -101,6 +108,21 @@ app.addEventListener("click", async (event) => {
   }
 });
 
+app.addEventListener("change", (event) => {
+  const target = event.target;
+  if (target.matches("[data-register-region]")) {
+    refreshRegisterStores(target.form, target.value);
+  } else if (target.matches("[data-register-store]")) {
+    toggleNewStoreField(target.form, target.value === ADD_NEW_STORE);
+  }
+});
+
+app.addEventListener("focusin", (event) => {
+  const target = event.target;
+  if (!target.matches("input, select, textarea")) return;
+  setTimeout(() => target.scrollIntoView({ block: "center", behavior: "smooth" }), 90);
+});
+
 app.addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.target;
@@ -109,9 +131,12 @@ app.addEventListener("submit", async (event) => {
 
   if (formName === "login") {
     await handleLogin(data);
+  } else if (formName === "register") {
+    await handleRegister(data);
   } else if (formName === "server") {
     state.apiUrl = normalizeUrl(data.apiUrl || "");
     localStorage.setItem(KEY.apiUrl, state.apiUrl);
+    await loadMeta();
     if (state.session?.passwordHash) {
       await syncNow(true);
     } else {
@@ -140,23 +165,78 @@ function renderAuth() {
           <p class="muted">Sign in to track Hisense TV sales.</p>
         </div>
 
-        <form class="card stack" data-form="login">
-          <div class="field">
-            <label>Username</label>
-            <input name="username" autocomplete="username" required>
+        <div class="segmented auth-switch">
+          <div class="seg-row two">
+            ${buttonSeg("auth-mode", "login", "Sign in", state.authMode === "login")}
+            ${buttonSeg("auth-mode", "register", "Create account", state.authMode === "register")}
           </div>
-          <div class="field">
-            <label>Password</label>
-            <input name="password" type="password" autocomplete="current-password" required>
-          </div>
-          <button class="button">Sign in</button>
-          <p class="muted">Users are managed from the backend admin screen.</p>
-        </form>
+        </div>
+
+        ${state.authMode === "register" ? renderRegisterForm() : renderLoginForm()}
 
         ${renderServerPanel()}
         ${toastHtml()}
       </section>
     </main>
+  `;
+}
+
+function renderLoginForm() {
+  return `
+    <form class="card stack" data-form="login">
+      <div class="field">
+        <label>Username</label>
+        <input name="username" autocomplete="username" required>
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <input name="password" type="password" autocomplete="current-password" required>
+      </div>
+      <button class="button">Sign in</button>
+      <p class="muted">Create an account if this is your first time using LlamaSales.</p>
+    </form>
+  `;
+}
+
+function renderRegisterForm() {
+  return `
+    <form class="card stack" data-form="register">
+      <div class="field">
+        <label>Username</label>
+        <input name="username" autocomplete="username" minlength="3" required>
+      </div>
+      <div class="field">
+        <label>Email</label>
+        <input name="email" type="email" autocomplete="email" required>
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <input name="password" type="password" autocomplete="new-password" minlength="8" required>
+      </div>
+      <div class="field">
+        <label>Confirm Password</label>
+        <input name="confirm" type="password" autocomplete="new-password" minlength="8" required>
+      </div>
+      <div class="field">
+        <label>Region</label>
+        <select name="region" data-register-region required>
+          <option value="">Choose region</option>
+          ${REGIONS.map((region) => `<option value="${esc(region)}">${esc(region)}</option>`).join("")}
+        </select>
+      </div>
+      <div class="field">
+        <label>Store</label>
+        <select name="storeChoice" data-register-store required disabled>
+          <option value="">Choose a region first</option>
+        </select>
+      </div>
+      <div class="field" data-new-store-wrap hidden>
+        <label>New Store Name</label>
+        <input name="newStore" autocomplete="organization">
+      </div>
+      <button class="button">Create account</button>
+      <p class="muted">Your account will be created on the LlamaSales backend and available for admin edits.</p>
+    </form>
   `;
 }
 
@@ -430,6 +510,48 @@ async function handleLogin(data) {
   }
 }
 
+async function handleRegister(data) {
+  const username = String(data.username || "").trim();
+  const email = String(data.email || "").trim();
+  const password = String(data.password || "");
+  const confirm = String(data.confirm || "");
+  const region = canonicalRegion(data.region || "");
+  const store = data.storeChoice === ADD_NEW_STORE ? String(data.newStore || "").trim() : String(data.storeChoice || "").trim();
+
+  if (!username || !email || !region || !store) {
+    toast("Complete all account fields.");
+    return;
+  }
+  if (/\s/.test(username) || username.length < 3) {
+    toast("Username must be at least 3 characters with no spaces.");
+    return;
+  }
+  if (password.length < 8) {
+    toast("Use at least 8 characters for the password.");
+    return;
+  }
+  if (password !== confirm) {
+    toast("Passwords do not match.");
+    return;
+  }
+
+  try {
+    const passwordHash = await sha256(password);
+    const payload = await apiPost("/api/register", { username, email, region, store, passwordHash });
+    applyServerPayload(payload);
+    applyMetaPayload(payload.meta);
+    const account = payload.account;
+    state.session = { username: account.username, passwordHash, account };
+    writeJson(KEY.session, state.session);
+    state.authMode = "login";
+    state.page = "dashboard";
+    toast("Account created.");
+    render();
+  } catch (error) {
+    toast(`Account creation failed: ${error.message}`);
+  }
+}
+
 async function saveSale(data) {
   const account = currentAccount();
   if (!account) return;
@@ -524,6 +646,16 @@ async function syncDaily() {
   }
 }
 
+async function loadMeta() {
+  if (!state.apiUrl) return;
+  try {
+    const payload = await apiGet("/api/meta");
+    applyMetaPayload(payload);
+  } catch {
+    // Store suggestions are useful but should not block sign-in.
+  }
+}
+
 async function syncNow(showResult) {
   if (!state.apiUrl) {
     if (showResult) toast("Set the backend URL first.");
@@ -565,6 +697,20 @@ async function apiPost(path, payload) {
   return body;
 }
 
+async function apiGet(path) {
+  const response = await fetch(`${state.apiUrl}${path}`, { method: "GET" });
+  let body = null;
+  try {
+    body = await response.json();
+  } catch {
+    body = null;
+  }
+  if (!response.ok || !body?.ok) {
+    throw new Error(body?.error || `HTTP ${response.status}`);
+  }
+  return body;
+}
+
 function authPayload() {
   return {
     username: state.session?.username || "",
@@ -593,7 +739,18 @@ function applyServerPayload(payload) {
     state.rates = payload.commissionRates;
     writeJson(KEY.rates, state.rates);
   }
+  applyMetaPayload(payload.meta);
   localStorage.setItem(KEY.lastSync, todayIso());
+}
+
+function applyMetaPayload(meta) {
+  if (!meta || typeof meta !== "object") return;
+  if (Array.isArray(meta.regions)) {
+    state.meta.regions = meta.regions.map((region) => canonicalRegion(region)).filter(Boolean);
+  }
+  if (meta.storesByRegion && typeof meta.storesByRegion === "object") {
+    state.meta.storesByRegion = meta.storesByRegion;
+  }
 }
 
 function dashboardStats(account, timeframe, scope) {
@@ -853,6 +1010,43 @@ function listRow(title, subtitleText, value) {
 
 function buttonSeg(action, value, label, active) {
   return `<button class="seg ${active ? "active" : ""}" data-action="${action}" data-value="${esc(value)}">${esc(label)}</button>`;
+}
+
+function refreshRegisterStores(form, region) {
+  if (!form) return;
+  const storeSelect = form.querySelector("[data-register-store]");
+  if (!storeSelect) return;
+  storeSelect.disabled = !region;
+  storeSelect.innerHTML = region ? registerStoreOptions(region) : `<option value="">Choose a region first</option>`;
+  toggleNewStoreField(form, false);
+}
+
+function toggleNewStoreField(form, show) {
+  if (!form) return;
+  const wrap = form.querySelector("[data-new-store-wrap]");
+  const input = form.elements.newStore;
+  if (!wrap || !input) return;
+  wrap.hidden = !show;
+  input.required = show;
+  if (!show) input.value = "";
+  if (show) setTimeout(() => input.scrollIntoView({ block: "center", behavior: "smooth" }), 60);
+}
+
+function registerStoreOptions(region) {
+  const stores = storesForRegion(region);
+  const existing = stores.map((store) => `<option value="${esc(store)}">${esc(store)}</option>`).join("");
+  return `<option value="">Choose store</option>${existing}<option value="${ADD_NEW_STORE}">Add new store</option>`;
+}
+
+function storesForRegion(region) {
+  const clean = canonicalRegion(region);
+  const storesByRegion = state.meta.storesByRegion || {};
+  const direct = Array.isArray(storesByRegion[clean]) ? storesByRegion[clean] : [];
+  const lowerKey = Object.keys(storesByRegion).find((key) => key.toLowerCase() === clean.toLowerCase());
+  const matched = lowerKey && Array.isArray(storesByRegion[lowerKey]) ? storesByRegion[lowerKey] : [];
+  const combined = [...direct, ...matched];
+  return [...new Set(combined.map((store) => String(store || "").trim()).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b));
 }
 
 function options(values, selected) {

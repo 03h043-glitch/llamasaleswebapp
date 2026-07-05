@@ -1,6 +1,6 @@
 # LlamaSales Backend
 
-The backend is a local Windows executable, not a Cloudflare Pages app.
+The backend is a local Windows executable, not a Cloudflare Workers app.
 
 Current production shape:
 
@@ -10,7 +10,7 @@ Current production shape:
 
 Run the local project-root executable on the laptop:
 
-`LlamaSalesBackend-v2.exe`
+`LlamaSalesBackend-v3.exe`
 
 Do not commit backend runtime data to this repository:
 
@@ -18,4 +18,4 @@ Do not commit backend runtime data to this repository:
 - compiled `.exe` files
 - backup JSON files
 
-The frontend in `/web` is the part Cloudflare Pages should build/deploy from GitHub.
+The frontend in `/web` is the part Cloudflare Workers Builds should deploy from GitHub.
