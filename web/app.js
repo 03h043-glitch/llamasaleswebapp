@@ -997,11 +997,42 @@ function brandShareBar(stats) {
   });
   const visibleSegments = segments.filter((item) => item.value > 0);
   const legendSegments = segments.filter((item) => item.value > 0 || item.brand === "Hisense");
+  const arcSegments = [];
+  let cursor = 0;
+
+  visibleSegments.forEach((item, index) => {
+    const start = cursor;
+    const end = index === visibleSegments.length - 1 ? 100 : Math.min(100, cursor + item.pct);
+    cursor = end;
+    if (end > start) arcSegments.push({ ...item, start, end });
+  });
+
+  const firstArc = arcSegments[0];
+  const lastArc = arcSegments[arcSegments.length - 1];
+  const score = Math.max(0, Math.min(100, Number(stats.shareOfValue) || 0));
+  const needle = gaugePoint(score, 76);
+  const marker10 = gaugeMarker(10);
+  const marker20 = gaugeMarker(20);
+  const label10 = gaugePoint(10, 116);
+  const label20 = gaugePoint(20, 116);
 
   return `
     <div class="brand-share" aria-label="Brand share of value">
-      <div class="brand-share-bar">
-        ${visibleSegments.length > 0 ? visibleSegments.map(brandShareSegment).join("") : `<span class="brand-share-empty"></span>`}
+      <div class="brand-share-gauge">
+        <svg viewBox="0 0 240 148" role="img" aria-label="Hisense share of value at ${score}% with brand value mix">
+          <path class="brand-share-track" d="${gaugeArc(0, 100)}"></path>
+          ${arcSegments.map(brandShareArcSegment).join("")}
+          ${firstArc ? brandShareCap(firstArc, "start") : ""}
+          ${lastArc ? brandShareCap(lastArc, "end") : ""}
+          <line class="brand-share-threshold" x1="${marker10.inner.x}" y1="${marker10.inner.y}" x2="${marker10.outer.x}" y2="${marker10.outer.y}"></line>
+          <line class="brand-share-threshold" x1="${marker20.inner.x}" y1="${marker20.inner.y}" x2="${marker20.outer.x}" y2="${marker20.outer.y}"></line>
+          <text class="brand-share-label" x="${label10.x}" y="${label10.y}">10%</text>
+          <text class="brand-share-label" x="${label20.x}" y="${label20.y}">20%</text>
+          <line class="brand-share-needle" x1="120" y1="118" x2="${needle.x}" y2="${needle.y}"></line>
+          <circle class="brand-share-hub" cx="120" cy="118" r="7"></circle>
+          <text class="brand-share-end-label" x="28" y="138">0%</text>
+          <text class="brand-share-end-label" x="212" y="138">100%</text>
+        </svg>
       </div>
       <div class="brand-share-legend">
         ${legendSegments.map((item) => `<span><i class="swatch" style="background:${item.color}"></i>${esc(item.brand)} ${shareLabel(item.pct)}</span>`).join("")}
@@ -1010,8 +1041,13 @@ function brandShareBar(stats) {
   `;
 }
 
-function brandShareSegment(item) {
-  return `<span class="brand-share-segment" style="width:${item.pct.toFixed(4)}%;background:${item.color}" title="${esc(item.brand)} ${shareLabel(item.pct)}" aria-label="${esc(item.brand)} ${shareLabel(item.pct)}"></span>`;
+function brandShareArcSegment(item) {
+  return `<path class="brand-share-arc-segment" d="${gaugeArc(item.start, item.end)}" stroke="${item.color}" aria-label="${esc(item.brand)} ${shareLabel(item.pct)}"></path>`;
+}
+
+function brandShareCap(item, position) {
+  const point = gaugePoint(position === "start" ? item.start : item.end, 92);
+  return `<circle class="brand-share-cap" cx="${point.x}" cy="${point.y}" r="8" fill="${item.color}"></circle>`;
 }
 
 function shareLabel(percent) {
@@ -1021,6 +1057,28 @@ function shareLabel(percent) {
 
 function brandColor(brand) {
   return BRAND_COLORS[brand] || BRAND_COLORS.Other;
+}
+
+function gaugeArc(startPercent, endPercent) {
+  const start = gaugePoint(startPercent, 92);
+  const end = gaugePoint(endPercent, 92);
+  const largeArc = Math.abs(endPercent - startPercent) > 100 ? 1 : 0;
+  return `M ${start.x} ${start.y} A 92 92 0 ${largeArc} 1 ${end.x} ${end.y}`;
+}
+
+function gaugeMarker(percent) {
+  return {
+    inner: gaugePoint(percent, 78),
+    outer: gaugePoint(percent, 106)
+  };
+}
+
+function gaugePoint(percent, radius) {
+  const angle = (180 - (Math.max(0, Math.min(100, percent)) * 1.8)) * Math.PI / 180;
+  return {
+    x: Math.round((120 + radius * Math.cos(angle)) * 10) / 10,
+    y: Math.round((118 - radius * Math.sin(angle)) * 10) / 10
+  };
 }
 
 function regionCard(region) {

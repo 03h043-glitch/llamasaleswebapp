@@ -260,38 +260,76 @@ h3 {
 }
 
 .sov-card {
-  min-height: 218px;
+  min-height: 258px;
 }
 
 .brand-share {
   display: grid;
-  gap: 10px;
-  margin-top: 18px;
+  gap: 8px;
+  margin-top: 12px;
 }
 
-.brand-share-bar {
-  display: flex;
-  height: 34px;
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 999px;
-  background: rgba(33, 38, 49, 0.92);
+.brand-share-gauge {
+  width: min(100%, 360px);
+  margin: 0 auto;
 }
 
-.brand-share-segment,
-.brand-share-empty {
+.brand-share-gauge svg {
   display: block;
-  height: 100%;
-  min-width: 0;
+  width: 100%;
+  height: auto;
+  overflow: visible;
 }
 
-.brand-share-segment {
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+.brand-share-track,
+.brand-share-arc-segment {
+  fill: none;
+  stroke-width: 16;
+  vector-effect: non-scaling-stroke;
 }
 
-.brand-share-empty {
-  flex: 1;
-  background: rgba(92, 108, 130, 0.32);
+.brand-share-track {
+  stroke: rgba(33, 38, 49, 0.92);
+  stroke-linecap: round;
+}
+
+.brand-share-arc-segment {
+  stroke-linecap: butt;
+}
+
+.brand-share-cap {
+  stroke: rgba(255, 255, 255, 0.16);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.brand-share-threshold {
+  stroke: rgba(255, 255, 255, 0.88);
+  stroke-linecap: round;
+  stroke-width: 2.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.brand-share-needle {
+  stroke: var(--accent);
+  stroke-linecap: round;
+  stroke-width: 4;
+  vector-effect: non-scaling-stroke;
+}
+
+.brand-share-hub {
+  fill: var(--accent);
+  stroke: rgba(255, 255, 255, 0.78);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.brand-share-label,
+.brand-share-end-label {
+  fill: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  text-anchor: middle;
 }
 
 .brand-share-legend {
