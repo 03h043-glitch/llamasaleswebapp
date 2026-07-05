@@ -349,15 +349,17 @@ function renderDashboard(account) {
       <div class="seg-row two">${SCOPES.map((scope) => buttonSeg("filter-scope", scope, scope, state.filters.scope === scope)).join("")}</div>
     </div>
 
-    <div class="grid">
-      ${kpi("Hisense Share of Value", `${stats.shareOfValue}%`, `${money(stats.hisenseRevenue)} of ${money(stats.totalRevenue)} total value`, sovColor, "span-4 large sov-card", brandShareBar(stats))}
-      ${kpi("Hisense Units", stats.hisenseUnits, `of ${stats.totalUnits} total units across brands`, DASHBOARD_ACCENT, "span-2")}
-      ${kpi("Hisense Revenue", money(stats.hisenseRevenue), `vs ${money(stats.totalRevenue)} across all brands`, DASHBOARD_ACCENT, "span-2")}
-      ${kpi("Hisense ASP", money(stats.hisenseAsp), "average selling price", DASHBOARD_ACCENT, "span-2")}
-      ${kpi("Soundbar Sales", stats.soundbarUnits, `${money(stats.soundbarRevenue)} soundbar value`, DASHBOARD_ACCENT, "span-2")}
-    </div>
+    <div class="dashboard-card-crop">
+      <div class="grid">
+        ${kpi("Hisense Share of Value", `${stats.shareOfValue}%`, `${money(stats.hisenseRevenue)} of ${money(stats.totalRevenue)} total value`, sovColor, "span-4 large sov-card", brandShareBar(stats))}
+        ${kpi("Hisense Units", stats.hisenseUnits, `of ${stats.totalUnits} total units across brands`, DASHBOARD_ACCENT, "span-2")}
+        ${kpi("Hisense Revenue", money(stats.hisenseRevenue), `vs ${money(stats.totalRevenue)} across all brands`, DASHBOARD_ACCENT, "span-2")}
+        ${kpi("Hisense ASP", money(stats.hisenseAsp), "average selling price", DASHBOARD_ACCENT, "span-2")}
+        ${kpi("Soundbar Sales", stats.soundbarUnits, `${money(stats.soundbarRevenue)} soundbar value`, DASHBOARD_ACCENT, "span-2")}
+      </div>
 
-    ${premiumMix(stats)}
+      ${premiumMix(stats)}
+    </div>
   `;
 }
 
@@ -946,17 +948,165 @@ function goDashboard() {
   render();
 }
 
-function shareDashboard() {
+async function shareDashboard() {
   const account = currentAccount();
   if (!account) return;
-  const stats = dashboardStats(account, state.filters.timeframe, state.filters.scope);
-  const text = `LlamaSales\nHisense SOV: ${stats.shareOfValue}%\nHisense Units: ${stats.hisenseUnits}/${stats.totalUnits}\nHisense Revenue: ${money(stats.hisenseRevenue)} of ${money(stats.totalRevenue)}`;
-  if (navigator.share) {
-    navigator.share({ title: "LlamaSales dashboard", text }).catch(() => {});
-  } else {
-    navigator.clipboard?.writeText(text);
-    toast("Dashboard summary copied.");
+  toast("Preparing dashboard image...");
+  const capture = createDashboardCaptureTarget(account);
+  try {
+    const file = await dashboardImageFile(capture.element);
+    const sharePayload = {
+      title: "LlamaSales dashboard",
+      text: "LlamaSales dashboard",
+      files: [file]
+    };
+    if (navigator.share && (!navigator.canShare || navigator.canShare(sharePayload))) {
+      try {
+        await navigator.share(sharePayload);
+        toast("");
+        return;
+      } catch (error) {
+        if (error?.name === "AbortError") {
+          toast("");
+          return;
+        }
+      }
+    }
+    if (navigator.clipboard && window.ClipboardItem) {
+      await navigator.clipboard.write([new ClipboardItem({ [file.type]: file })]);
+      toast("Dashboard image copied.");
+      return;
+    }
+    downloadFile(file);
+    toast("Dashboard image downloaded.");
+  } catch (error) {
+    console.error(error);
+    toast("Could not create dashboard image.");
+  } finally {
+    capture.cleanup();
   }
+}
+
+function createDashboardCaptureTarget(account) {
+  const visible = document.querySelector(".dashboard-card-crop");
+  if (visible) return { element: visible, cleanup: () => {} };
+
+  const width = Math.round(document.querySelector(".content")?.getBoundingClientRect().width || Math.min(window.innerWidth - 28, 420));
+  const host = document.createElement("div");
+  host.className = "share-capture-host";
+  host.style.cssText = `position:fixed;left:-10000px;top:0;width:${width}px;pointer-events:none;opacity:0;`;
+  host.innerHTML = renderDashboard(account);
+  document.body.appendChild(host);
+  return {
+    element: host.querySelector(".dashboard-card-crop"),
+    cleanup: () => host.remove()
+  };
+}
+
+async function dashboardImageFile(element) {
+  if (!element) throw new Error("Dashboard capture target missing");
+  if (document.fonts?.ready) await document.fonts.ready;
+
+  const rect = element.getBoundingClientRect();
+  const width = Math.ceil(rect.width);
+  const height = Math.ceil(element.scrollHeight || rect.height);
+  const scale = Math.min(3, Math.max(2, window.devicePixelRatio || 2));
+  const svg = dashboardCaptureSvg(element, width, height);
+  const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }));
+
+  try {
+    const image = await loadImage(url);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.ceil(width * scale);
+    canvas.height = Math.ceil(height * scale);
+    const context = canvas.getContext("2d");
+    context.scale(scale, scale);
+    context.drawImage(image, 0, 0, width, height);
+    const blob = await canvasBlob(canvas);
+    return new File([blob], `llamasales-dashboard-${todayIso()}.png`, { type: "image/png" });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function dashboardCaptureSvg(element, width, height) {
+  const clone = element.cloneNode(true);
+  clone.classList.add("share-crop-clone");
+  const css = collectCaptureCss();
+  const vars = captureCssVariables();
+  const html = clone.outerHTML;
+  return `
+    <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+      <foreignObject width="100%" height="100%">
+        <div xmlns="http://www.w3.org/1999/xhtml" class="share-canvas-root" style="${vars} width:${width}px; min-height:${height}px;">
+          <style>${css}</style>
+          ${html}
+        </div>
+      </foreignObject>
+    </svg>
+  `;
+}
+
+function collectCaptureCss() {
+  const blocks = [];
+  for (const sheet of Array.from(document.styleSheets)) {
+    try {
+      blocks.push(Array.from(sheet.cssRules).map((rule) => rule.cssText).join("\n"));
+    } catch (error) {
+      // Cross-origin styles are skipped; this app's capture styles are same-origin.
+    }
+  }
+  blocks.push(`
+    .share-canvas-root {
+      margin: 0;
+      background: #05030a;
+      color: #ffffff;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    .share-crop-clone {
+      margin: 0;
+    }
+  `);
+  return blocks.join("\n").replace(/<\/style/gi, "<\\/style");
+}
+
+function captureCssVariables() {
+  const styles = getComputedStyle(document.documentElement);
+  const names = [
+    "--bg", "--panel", "--card", "--card-strong", "--field", "--stroke", "--field-stroke",
+    "--ink", "--muted", "--subtle", "--hisense", "--green", "--yellow", "--red",
+    "--blue", "--violet", "--orange", "--cyan", "--teal", "--gold", "--blood", "--laser"
+  ];
+  return names.map((name) => `${name}:${styles.getPropertyValue(name).trim()};`).join("");
+}
+
+function loadImage(url) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+    image.src = url;
+  });
+}
+
+function canvasBlob(canvas) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error("Image export failed"));
+    }, "image/png");
+  });
+}
+
+function downloadFile(file) {
+  const url = URL.createObjectURL(file);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = file.name;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function subtitle(account) {

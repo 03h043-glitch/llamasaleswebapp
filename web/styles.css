@@ -222,6 +222,11 @@ h3 {
   gap: 10px;
 }
 
+.dashboard-card-crop {
+  display: grid;
+  gap: 10px;
+}
+
 .span-2 {
   grid-column: span 2;
 }
