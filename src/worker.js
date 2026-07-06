@@ -22,11 +22,11 @@ export default {
     if (request.method === "OPTIONS") return corsResponse(null, request, 204);
 
     try {
-      if (url.pathname.startsWith("/api/")) return handleApi(request, env, url);
+      if (url.pathname.startsWith("/api/")) return await handleApi(request, env, url);
       if (url.hostname.startsWith("api.") || url.pathname.startsWith("/admin") || url.pathname === "/backup") {
-        return handleAdmin(request, env, url);
+        return await handleAdmin(request, env, url);
       }
-      return env.ASSETS.fetch(request);
+      return await env.ASSETS.fetch(request);
     } catch (error) {
       const wantsJson = url.pathname.startsWith("/api/");
       if (wantsJson) return json({ ok: false, error: error.message || "Server error" }, request, 500);
