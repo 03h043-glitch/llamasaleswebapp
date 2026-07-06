@@ -50,6 +50,7 @@ const KEY = {
   sales: "llamasales.pwa.sales",
   deletedSales: "llamasales.pwa.deletedSales",
   rates: "llamasales.pwa.rates",
+  rateHistory: "llamasales.pwa.rateHistory",
   meta: "llamasales.pwa.meta",
   ui: "llamasales.pwa.ui",
   session: "llamasales.pwa.session",
@@ -68,6 +69,7 @@ const state = {
   sales: readJson(KEY.sales, []),
   deletedSales: readJson(KEY.deletedSales, []),
   rates: readJson(KEY.rates, {}),
+  rateHistory: readJson(KEY.rateHistory, []),
   session: readJson(KEY.session, null),
   meta: readJson(KEY.meta, { regions: REGIONS, storesByRegion: {}, models: MODELS, soundbarModels: SOUNDBAR_MODELS, sizes: SIZES }),
   filters: { timeframe: "Today", scope: "Store" },
@@ -1067,6 +1069,10 @@ function applyServerPayload(payload) {
     state.rates = payload.commissionRates;
     writeJson(KEY.rates, state.rates);
   }
+  if (Array.isArray(payload.commissionRateHistory)) {
+    state.rateHistory = payload.commissionRateHistory.map(normalizeRateHistory).filter(Boolean);
+    writeJson(KEY.rateHistory, state.rateHistory);
+  }
   applyMetaPayload(payload.meta);
   localStorage.setItem(KEY.lastSync, todayIso());
 }
@@ -1263,7 +1269,13 @@ function premiumIndex(model) {
 
 function commissionValue(sale) {
   const key = commissionRateKey(sale);
+  const dated = datedCommissionOverride(sale, key);
+  if (dated.found) return dated.cleared ? defaultCommissionValue(sale) : Number(dated.value || 0);
   if (Object.prototype.hasOwnProperty.call(state.rates, key)) return Number(state.rates[key] || 0);
+  return defaultCommissionValue(sale);
+}
+
+function defaultCommissionValue(sale) {
   if (saleItemType(sale) === "soundbar") return OTHER_HISENSE_COMMISSION;
   const index = premiumIndex(sale.model);
   return index >= 0 ? DEFAULT_COMMISSION[index] : OTHER_HISENSE_COMMISSION;
@@ -1272,6 +1284,34 @@ function commissionValue(sale) {
 function commissionRateKey(sale) {
   if (saleItemType(sale) === "soundbar") return `soundbar|${sale.model || ""}|`;
   return `${sale.model || ""}|${sale.size || ""}`;
+}
+
+function datedCommissionOverride(sale, key) {
+  const saleDate = String(sale.date || todayIso());
+  let match = null;
+  for (const row of state.rateHistory) {
+    if (!row || row.key !== key || row.effectiveFrom > saleDate) continue;
+    if (!match || row.effectiveFrom > match.effectiveFrom) match = row;
+  }
+  return match ? { found: true, value: match.value, cleared: match.cleared } : { found: false };
+}
+
+function normalizeRateHistory(row) {
+  if (!row || typeof row !== "object") return null;
+  const itemType = saleItemType({ itemType: row.itemType || row.item_type });
+  const model = String(row.model || "");
+  const size = itemType === "soundbar" ? "" : String(row.size || "");
+  const effectiveFrom = String(row.effectiveFrom || row.effective_from || "");
+  if (!model || !/^\d{4}-\d{2}-\d{2}$/.test(effectiveFrom)) return null;
+  return {
+    itemType,
+    model,
+    size,
+    key: itemType === "soundbar" ? `soundbar|${model}|` : `${model}|${size}`,
+    effectiveFrom,
+    value: Number(row.value || 0),
+    cleared: Boolean(row.cleared)
+  };
 }
 
 function currentAccount() {

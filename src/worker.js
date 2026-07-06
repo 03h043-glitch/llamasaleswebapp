@@ -37,6 +37,7 @@ export default {
 
 async function handleApi(request, env, url) {
   const db = requireDb(env);
+  await ensureSchema(db);
 
   if (request.method === "GET" && url.pathname === "/api/status") {
     const users = await count(db, "users");
@@ -107,8 +108,7 @@ async function handleApi(request, env, url) {
     if (!model || (itemType === "tv" && !size)) return json({ ok: false, error: "Model and size are required" }, request, 400);
     await saveModel(db, itemType, model);
     if (size) await saveSize(db, size);
-    await db.prepare("INSERT INTO commission_rates (item_type,model,size,value) VALUES (?,?,?,?) ON CONFLICT(item_type,model,size) DO UPDATE SET value=excluded.value")
-      .bind(itemType, model, size, value).run();
+    await saveCommissionRate(db, itemType, model, size, value, todayIso(), false);
     return json(await clientPayload(db, user), request);
   }
 
@@ -117,6 +117,7 @@ async function handleApi(request, env, url) {
 
 async function handleAdmin(request, env, url) {
   const db = requireDb(env);
+  await ensureSchema(db);
   await ensureDefaults(db);
 
   if (request.method === "POST" && url.pathname === "/admin/setup") {
@@ -168,6 +169,18 @@ async function handleAdmin(request, env, url) {
     await saveSize(db, clean(form.get("size")));
     return redirect("/admin");
   }
+  if (request.method === "GET" && url.pathname === "/admin/rates/dated") {
+    const itemType = clean(url.searchParams.get("itemType")) === "soundbar" ? "soundbar" : "tv";
+    return html(await datedRatesPage(db, itemType, url.searchParams.get("saved") === "1"), request);
+  }
+  if (request.method === "POST" && url.pathname === "/admin/rates/batch-save") {
+    await adminBatchSaveRates(request, db, false);
+    return redirect("/admin");
+  }
+  if (request.method === "POST" && url.pathname === "/admin/rates/dated-save") {
+    const itemType = await adminBatchSaveRates(request, db, true);
+    return redirect(`/admin/rates/dated?itemType=${encodeURIComponent(itemType)}&saved=1`);
+  }
   if (request.method === "POST" && url.pathname === "/admin/rates/save") {
     const form = await request.formData();
     const itemType = clean(form.get("itemType")) === "soundbar" ? "soundbar" : "tv";
@@ -176,10 +189,9 @@ async function handleAdmin(request, env, url) {
     const valueText = clean(form.get("value"));
     if (model && (itemType === "soundbar" || size)) {
       if (!valueText) {
-        await db.prepare("DELETE FROM commission_rates WHERE item_type=? AND model=? AND size=?").bind(itemType, model, size).run();
+        await saveCommissionRate(db, itemType, model, size, 0, todayIso(), true);
       } else {
-        await db.prepare("INSERT INTO commission_rates (item_type,model,size,value) VALUES (?,?,?,?) ON CONFLICT(item_type,model,size) DO UPDATE SET value=excluded.value")
-          .bind(itemType, model, size, Number(valueText || 0)).run();
+        await saveCommissionRate(db, itemType, model, size, Number(valueText || 0), todayIso(), false);
       }
     }
     return redirect("/admin");
@@ -210,6 +222,54 @@ async function adminSaveUser(request, db) {
   if (!passwordHash) return;
   await db.prepare("INSERT INTO users (username,password_hash,email,region,store,created_at) VALUES (?,?,?,?,?,?) ON CONFLICT(username) DO UPDATE SET email=excluded.email, region=excluded.region, store=excluded.store, password_hash=excluded.password_hash")
     .bind(username, passwordHash, email, region, store, existing?.created_at || Date.now()).run();
+}
+
+async function adminBatchSaveRates(request, db, datedOnly) {
+  const form = await request.formData();
+  const itemType = clean(form.get("itemType")) === "soundbar" ? "soundbar" : "tv";
+  const effectiveFrom = datedOnly ? validDateOrToday(form.get("effectiveFrom")) : todayIso();
+  const combos = form.getAll("combo");
+  const values = form.getAll("value");
+  const currentRates = datedOnly ? {} : await ratesMap(db);
+
+  for (let index = 0; index < combos.length; index += 1) {
+    const combo = parseCombo(combos[index]);
+    if (!combo || combo.itemType !== itemType) continue;
+    const model = clean(combo.model);
+    const size = itemType === "soundbar" ? "" : clean(combo.size);
+    if (!model || (itemType === "tv" && !size)) continue;
+
+    const valueText = clean(values[index]);
+    const key = rateKey(itemType, model, size);
+
+    if (datedOnly) {
+      if (!valueText) continue;
+      await saveCommissionRate(db, itemType, model, size, Number(valueText || 0), effectiveFrom, false);
+      continue;
+    }
+
+    const hasCurrentValue = Object.prototype.hasOwnProperty.call(currentRates, key);
+    if (!valueText) {
+      if (hasCurrentValue) await saveCommissionRate(db, itemType, model, size, 0, effectiveFrom, true);
+      continue;
+    }
+
+    const nextValue = Number(valueText || 0);
+    if (!hasCurrentValue || Number(currentRates[key] || 0) !== nextValue) {
+      await saveCommissionRate(db, itemType, model, size, nextValue, effectiveFrom, false);
+    }
+  }
+
+  return itemType;
+}
+
+function parseCombo(value) {
+  try {
+    const parsed = JSON.parse(String(value || ""));
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 async function adminHome(db) {
@@ -274,14 +334,21 @@ function matrixSection(title, itemType, models, sizes, rates) {
   return `
     <section class="card">
       <h2>${escapeHtml(title)}</h2>
-      <p class="muted">Models run down rows and sizes run across columns. Save a blank cell to clear it.</p>
+      <p class="muted">Models run down rows and sizes run across columns. Edit any number of cells, then save the whole matrix once.</p>
       <div class="matrixTools">
         <form method="post" action="/admin/catalog/model/save"><input type="hidden" name="itemType" value="${itemType}"><label>Add TV Model</label><div class="inlineForm"><input name="model" placeholder="Model name"><button>Add</button></div></form>
         <form method="post" action="/admin/catalog/size/save"><label>Add Size</label><div class="inlineForm"><input name="size" placeholder="Screen size"><button>Add</button></div></form>
       </div>
-      <div class="matrixWrap"><table class="matrix"><thead><tr><th>Model</th>${sizes.map((size) => `<th>${escapeHtml(size)}"</th>`).join("")}</tr></thead><tbody>
-        ${models.map((model) => `<tr><th scope="row">${escapeHtml(model)}</th>${sizes.map((size) => rateCell(itemType, model, size, rates)).join("")}</tr>`).join("")}
-      </tbody></table></div>
+      <form method="post" action="/admin/rates/batch-save" class="stackForm">
+        <input type="hidden" name="itemType" value="${attr(itemType)}">
+        <div class="actions matrixActions">
+          <button>Save All Current TV Rates</button>
+          <a class="buttonLink ghost" href="/admin/rates/dated?itemType=${encodeURIComponent(itemType)}" target="_blank" rel="noopener">Dated TV Changes</a>
+        </div>
+        <div class="matrixWrap"><table class="matrix"><thead><tr><th>Model</th>${sizes.map((size) => `<th>${escapeHtml(size)}"</th>`).join("")}</tr></thead><tbody>
+          ${models.map((model) => `<tr><th scope="row">${escapeHtml(model)}</th>${sizes.map((size) => rateInputCell(itemType, model, size, rates)).join("")}</tr>`).join("")}
+        </tbody></table></div>
+      </form>
     </section>
   `;
 }
@@ -293,17 +360,56 @@ function soundbarSection(models, rates) {
       <div class="matrixTools">
         <form method="post" action="/admin/catalog/model/save"><input type="hidden" name="itemType" value="soundbar"><label>Add Soundbar Model</label><div class="inlineForm"><input name="model" placeholder="Soundbar model"><button>Add</button></div></form>
       </div>
-      <div class="matrixWrap"><table class="matrix"><thead><tr><th>Model</th><th>Commission</th></tr></thead><tbody>
-        ${models.map((model) => `<tr><th scope="row">${escapeHtml(model)}</th>${rateCell("soundbar", model, "", rates)}</tr>`).join("")}
-      </tbody></table></div>
+      <form method="post" action="/admin/rates/batch-save" class="stackForm">
+        <input type="hidden" name="itemType" value="soundbar">
+        <div class="actions matrixActions">
+          <button>Save All Current Soundbar Rates</button>
+          <a class="buttonLink ghost" href="/admin/rates/dated?itemType=soundbar" target="_blank" rel="noopener">Dated Soundbar Changes</a>
+        </div>
+        <div class="matrixWrap"><table class="matrix soundbarMatrix"><thead><tr><th>Model</th><th>Commission</th></tr></thead><tbody>
+          ${models.map((model) => `<tr><th scope="row">${escapeHtml(model)}</th>${rateInputCell("soundbar", model, "", rates)}</tr>`).join("")}
+        </tbody></table></div>
+      </form>
     </section>
   `;
 }
 
-function rateCell(itemType, model, size, rates) {
+function rateInputCell(itemType, model, size, rates, blank = false) {
   const key = rateKey(itemType, model, size);
-  const value = rates[key] ?? "";
-  return `<td><form method="post" action="/admin/rates/save" class="matrixCell"><input type="hidden" name="itemType" value="${attr(itemType)}"><input type="hidden" name="model" value="${attr(model)}"><input type="hidden" name="size" value="${attr(size)}"><input class="matrixInput" name="value" type="number" step="0.01" value="${attr(value)}" placeholder="-"><button>Save</button></form></td>`;
+  const value = blank ? "" : rates[key] ?? "";
+  return `<td><input type="hidden" name="combo" value="${attr(JSON.stringify({ itemType, model, size }))}"><input class="matrixInput" name="value" type="number" step="0.01" value="${attr(value)}" placeholder="-"></td>`;
+}
+
+async function datedRatesPage(db, itemType, saved = false) {
+  const tvModels = await modelList(db, "tv");
+  const soundbarModels = await modelList(db, "soundbar");
+  const sizes = await sizeList(db);
+  const models = itemType === "soundbar" ? soundbarModels : tvModels;
+  return page(`Dated ${itemType === "soundbar" ? "Soundbar" : "TV"} Commission Changes`, `
+    <section class="card">
+      <div class="actions">
+        <div style="flex:1 1 auto">
+          <h1>Dated ${itemType === "soundbar" ? "Soundbar" : "TV"} Commission Changes</h1>
+          <p class="muted">Only filled cells will be saved. Blank cells keep their previous value.</p>
+        </div>
+        <a class="buttonLink ghost" href="/admin">Back to Admin</a>
+      </div>
+      ${saved ? `<p class="notice">Dated changes saved. Blank cells were left unchanged.</p>` : ""}
+      <form method="post" action="/admin/rates/dated-save" class="stackForm">
+        <input type="hidden" name="itemType" value="${attr(itemType)}">
+        <div class="datedHeader">
+          <div><label>Start Date</label><input name="effectiveFrom" type="date" value="${todayIso()}" required></div>
+          <button>Apply Dated Changes</button>
+        </div>
+        <div class="matrixWrap"><table class="matrix ${itemType === "soundbar" ? "soundbarMatrix" : ""}">
+          <thead><tr><th>Model</th>${itemType === "soundbar" ? "<th>Commission</th>" : sizes.map((size) => `<th>${escapeHtml(size)}"</th>`).join("")}</tr></thead>
+          <tbody>
+            ${models.map((model) => `<tr><th scope="row">${escapeHtml(model)}</th>${itemType === "soundbar" ? rateInputCell("soundbar", model, "", {}, true) : sizes.map((size) => rateInputCell("tv", model, size, {}, true)).join("")}</tr>`).join("")}
+          </tbody>
+        </table></div>
+      </form>
+    </section>
+  `);
 }
 
 function adminSetup(error = "") {
@@ -319,7 +425,7 @@ function page(title, body) {
 }
 
 function adminCss() {
-  return "body{margin:0;background:#05030a;color:#f8fafc;font-family:Segoe UI,Arial,sans-serif}main{max-width:1180px;margin:0 auto;padding:28px 18px 60px}h1{margin:0 0 4px;font-size:34px}h2{margin:0 0 14px;font-size:20px}.muted{color:#9dabc0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}.card{background:rgba(24,27,34,.82);border:1px solid rgba(114,126,166,.65);border-radius:14px;padding:16px;margin:14px 0}.auth{max-width:430px;margin:54px auto}.kpi{font-size:32px;font-weight:800;color:#00aaa6}label{display:block;font-size:12px;color:#9dabc0;margin:10px 0 4px}input,select{box-sizing:border-box;width:100%;height:38px;border-radius:10px;border:1px solid rgba(120,136,166,.7);background:#0b0d11;color:#fff;padding:0 10px}button,.buttonLink{display:inline-flex;align-items:center;justify-content:center;min-height:38px;border:0;border-radius:10px;background:#00aaa6;color:#fff;font-weight:700;padding:0 14px;cursor:pointer;text-decoration:none}.danger{background:#b21c2d}.row{display:grid;grid-template-columns:1.2fr 1.4fr 1fr 1fr auto;gap:8px;align-items:end}.userEdit{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end;border-top:1px solid rgba(120,136,166,.25);padding:10px 0}.userEditForm{display:grid;grid-template-columns:1.1fr 1.5fr 1fr 1fr 1fr auto;gap:8px;align-items:end}.table{width:100%;border-collapse:collapse}.table th,.table td{border-bottom:1px solid rgba(120,136,166,.35);padding:8px;text-align:left;font-size:13px}.pill{display:inline-block;border:1px solid rgba(0,170,166,.6);border-radius:999px;padding:4px 8px;color:#00aaa6;font-size:12px}.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.error{color:#ff8b8b;font-weight:700}.notice{color:#7df2c7;font-weight:700}.matrixTools{display:grid;grid-template-columns:repeat(2,minmax(180px,1fr));gap:10px;margin:10px 0 14px}.inlineForm{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}.matrixWrap{overflow:auto;border:1px solid rgba(120,136,166,.35);border-radius:12px}.matrix{width:100%;border-collapse:separate;border-spacing:0;min-width:760px}.matrix th,.matrix td{border-bottom:1px solid rgba(120,136,166,.28);border-right:1px solid rgba(120,136,166,.2);padding:7px;text-align:left;font-size:12px}.matrix th{position:sticky;top:0;background:#10131a;z-index:1;color:#dbeafe}.matrix th:first-child{left:0;z-index:2}.matrix tbody th{top:auto;left:0;background:#10131a}.matrixCell{display:grid;grid-template-columns:minmax(74px,1fr) auto;gap:6px;align-items:center}.matrixInput{height:32px;padding:0 8px}.matrixCell button{min-height:32px;padding:0 9px;font-size:12px}@media(max-width:980px){.userEdit,.userEditForm{grid-template-columns:1fr}.matrixTools{grid-template-columns:1fr}}@media(max-width:760px){.row{grid-template-columns:1fr}.table{display:block;overflow:auto}}";
+  return "body{margin:0;background:#05030a;color:#f8fafc;font-family:Segoe UI,Arial,sans-serif}main{max-width:1180px;margin:0 auto;padding:28px 18px 60px}h1{margin:0 0 4px;font-size:34px}h2{margin:0 0 14px;font-size:20px}.muted{color:#9dabc0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}.card{background:rgba(24,27,34,.82);border:1px solid rgba(114,126,166,.65);border-radius:14px;padding:16px;margin:14px 0}.auth{max-width:430px;margin:54px auto}.kpi{font-size:32px;font-weight:800;color:#00aaa6}label{display:block;font-size:12px;color:#9dabc0;margin:10px 0 4px}input,select{box-sizing:border-box;width:100%;height:38px;border-radius:10px;border:1px solid rgba(120,136,166,.7);background:#0b0d11;color:#fff;padding:0 10px}button,.buttonLink{display:inline-flex;align-items:center;justify-content:center;min-height:38px;border:0;border-radius:10px;background:#00aaa6;color:#fff;font-weight:700;padding:0 14px;cursor:pointer;text-decoration:none}.ghost{background:rgba(120,136,166,.16);border:1px solid rgba(120,136,166,.42);color:#dbeafe}.danger{background:#b21c2d}.row{display:grid;grid-template-columns:1.2fr 1.4fr 1fr 1fr auto;gap:8px;align-items:end}.userEdit{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end;border-top:1px solid rgba(120,136,166,.25);padding:10px 0}.userEditForm{display:grid;grid-template-columns:1.1fr 1.5fr 1fr 1fr 1fr auto;gap:8px;align-items:end}.table{width:100%;border-collapse:collapse}.table th,.table td{border-bottom:1px solid rgba(120,136,166,.35);padding:8px;text-align:left;font-size:13px}.pill{display:inline-block;border:1px solid rgba(0,170,166,.6);border-radius:999px;padding:4px 8px;color:#00aaa6;font-size:12px}.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.error{color:#ff8b8b;font-weight:700}.notice{color:#7df2c7;font-weight:700}.matrixTools{display:grid;grid-template-columns:repeat(2,minmax(180px,1fr));gap:10px;margin:10px 0 14px}.inlineForm{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}.stackForm{display:grid;gap:12px}.matrixActions{justify-content:flex-end;margin:4px 0}.datedHeader{display:grid;grid-template-columns:minmax(180px,260px) auto;gap:10px;align-items:end;margin:10px 0 14px}.matrixWrap{overflow:auto;border:1px solid rgba(120,136,166,.35);border-radius:12px}.matrix{width:100%;border-collapse:separate;border-spacing:0;min-width:760px}.soundbarMatrix{min-width:420px}.matrix th,.matrix td{border-bottom:1px solid rgba(120,136,166,.28);border-right:1px solid rgba(120,136,166,.2);padding:7px;text-align:left;font-size:12px}.matrix th{position:sticky;top:0;background:#10131a;z-index:1;color:#dbeafe}.matrix th:first-child{left:0;z-index:2}.matrix tbody th{top:auto;left:0;background:#10131a}.matrixInput{height:32px;padding:0 8px;min-width:74px}@media(max-width:980px){.userEdit,.userEditForm{grid-template-columns:1fr}.matrixTools{grid-template-columns:1fr}}@media(max-width:760px){.row,.datedHeader{grid-template-columns:1fr}.table{display:block;overflow:auto}}";
 }
 
 async function clientPayload(db, user) {
@@ -329,6 +435,7 @@ async function clientPayload(db, user) {
     account: userToClient(user),
     sales: (await all(db, "SELECT * FROM sales ORDER BY created_at DESC")).map(saleToClient),
     commissionRates: await ratesClientMap(db),
+    commissionRateHistory: await rateHistoryClientList(db),
     meta: await publicMeta(db)
   };
 }
@@ -359,6 +466,12 @@ async function ensureDefaults(db) {
   for (const [index, model] of TV_MODELS.entries()) await db.prepare("INSERT OR IGNORE INTO product_models (item_type,model,sort_order) VALUES ('tv',?,?)").bind(model, (index + 1) * 10).run();
   for (const [index, model] of SOUNDBAR_MODELS.entries()) await db.prepare("INSERT OR IGNORE INTO product_models (item_type,model,sort_order) VALUES ('soundbar',?,?)").bind(model, (index + 1) * 10).run();
   for (const [index, size] of SIZES.entries()) await db.prepare("INSERT OR IGNORE INTO product_sizes (size,sort_order) VALUES (?,?)").bind(size, (index + 1) * 10).run();
+}
+
+async function ensureSchema(db) {
+  await db.prepare("CREATE TABLE IF NOT EXISTS commission_rate_history (item_type TEXT NOT NULL, model TEXT NOT NULL, size TEXT NOT NULL DEFAULT '', effective_from TEXT NOT NULL, value REAL NOT NULL DEFAULT 0, cleared INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, PRIMARY KEY (item_type, model, size, effective_from))").run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_commission_rate_history_effective ON commission_rate_history (item_type, model, size, effective_from)").run();
+  await db.prepare("INSERT OR IGNORE INTO commission_rate_history (item_type, model, size, effective_from, value, cleared, created_at) SELECT item_type, model, size, '1970-01-01', value, 0, 0 FROM commission_rates").run();
 }
 
 async function authenticatedUser(db, body) {
@@ -397,14 +510,63 @@ function normalizeSale(raw, user) {
 }
 
 async function ratesClientMap(db) {
-  const rows = await all(db, "SELECT * FROM commission_rates");
+  const rows = await effectiveRateRows(db, todayIso());
   const map = {};
-  for (const row of rows) map[rateKey(row.item_type, row.model, row.size)] = Number(row.value || 0);
+  for (const row of rows) {
+    if (!Number(row.cleared || 0)) map[rateKey(row.item_type, row.model, row.size)] = Number(row.value || 0);
+  }
   return map;
 }
 
 async function ratesMap(db) {
   return ratesClientMap(db);
+}
+
+async function rateHistoryClientList(db) {
+  const rows = await all(db, "SELECT item_type, model, size, effective_from, value, cleared FROM commission_rate_history ORDER BY item_type, model, size, effective_from");
+  return rows.map((row) => ({
+    itemType: row.item_type === "soundbar" ? "soundbar" : "tv",
+    model: row.model || "",
+    size: row.size || "",
+    effectiveFrom: row.effective_from || "1970-01-01",
+    value: Number(row.value || 0),
+    cleared: Boolean(Number(row.cleared || 0))
+  }));
+}
+
+async function effectiveRateRows(db, effectiveDate) {
+  return all(db, `
+    SELECT history.*
+    FROM commission_rate_history history
+    JOIN (
+      SELECT item_type, model, size, MAX(effective_from) effective_from
+      FROM commission_rate_history
+      WHERE effective_from <= ?
+      GROUP BY item_type, model, size
+    ) latest
+      ON latest.item_type = history.item_type
+     AND latest.model = history.model
+     AND latest.size = history.size
+     AND latest.effective_from = history.effective_from
+    ORDER BY history.item_type, history.model, history.size
+  `, effectiveDate);
+}
+
+async function saveCommissionRate(db, itemType, model, size, value, effectiveFrom, cleared) {
+  await saveModel(db, itemType, model);
+  if (itemType === "tv") await saveSize(db, size);
+  const cleanDate = validDateOrToday(effectiveFrom);
+  await db.prepare("INSERT INTO commission_rate_history (item_type,model,size,effective_from,value,cleared,created_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(item_type,model,size,effective_from) DO UPDATE SET value=excluded.value, cleared=excluded.cleared, created_at=excluded.created_at")
+    .bind(itemType, model, size, cleanDate, Number(value || 0), cleared ? 1 : 0, Date.now()).run();
+
+  if (cleanDate <= todayIso()) {
+    if (cleared) {
+      await db.prepare("DELETE FROM commission_rates WHERE item_type=? AND model=? AND size=?").bind(itemType, model, size).run();
+    } else {
+      await db.prepare("INSERT INTO commission_rates (item_type,model,size,value) VALUES (?,?,?,?) ON CONFLICT(item_type,model,size) DO UPDATE SET value=excluded.value")
+        .bind(itemType, model, size, Number(value || 0)).run();
+    }
+  }
 }
 
 function rateKey(itemType, model, size) {
@@ -437,9 +599,20 @@ async function buildBackup(db) {
     users: await all(db, "SELECT * FROM users"),
     sales: await all(db, "SELECT * FROM sales"),
     commissionRates: await all(db, "SELECT * FROM commission_rates"),
+    commissionRateHistory: await all(db, "SELECT * FROM commission_rate_history"),
     productModels: await all(db, "SELECT * FROM product_models"),
     productSizes: await all(db, "SELECT * FROM product_sizes")
   };
+}
+
+function todayIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function validDateOrToday(value) {
+  const text = clean(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+  return todayIso();
 }
 
 async function adminPasswordHash(db) {
