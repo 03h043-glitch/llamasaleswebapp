@@ -8,15 +8,12 @@
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
     "run_worker_first": true
-  }
-
-  // After creating the D1 database, add the binding below and replace database_id:
-  // ,
-  // "d1_databases": [
-  //   {
-  //     "binding": "DB",
-  //     "database_name": "llamasales-db",
-  //     "database_id": "REPLACE_WITH_D1_DATABASE_ID"
-  //   }
-  // ]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "llamasales-db",
+      "database_id": "d38e64d5-a6a7-44e2-b431-caf2c83eaddf"
+    }
+  ]
 }
