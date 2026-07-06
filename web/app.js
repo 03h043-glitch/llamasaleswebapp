@@ -73,6 +73,7 @@ const state = {
   filters: { timeframe: "Today", scope: "Store" },
   salesDay: todayIso(),
   salesSort: "time",
+  editSaleId: "",
   commissionView: "Today",
   selectedPayPeriod: "",
   ui: readJson(KEY.ui, { commissionFloatHidden: false, commissionFloatX: null, commissionFloatY: null }),
@@ -125,6 +126,9 @@ app.addEventListener("click", async (event) => {
     changeSalesDay(value);
   } else if (action === "sales-sort") {
     state.salesSort = value || "time";
+    render();
+  } else if (action === "edit-sale") {
+    state.editSaleId = state.editSaleId === value ? "" : value;
     render();
   } else if (action === "delete-sale") {
     await deleteSale(value);
@@ -488,8 +492,19 @@ function renderTodaysSales(account) {
         ${buttonSeg("sales-sort", "model", "Model", state.salesSort === "model")}
       </div>
     </div>
-    <section class="card sales-list">
-      ${rows.length ? rows.map(saleEditRow).join("") : `<p class="muted">No sales logged for this day.</p>`}
+    <section class="card sales-table-card">
+      ${rows.length ? `
+        <div class="sales-table">
+          <div class="sales-table-head">
+            <span>Brand</span>
+            <span>Model</span>
+            <span>Size</span>
+            <span>Price</span>
+            <span></span>
+          </div>
+          ${rows.map(saleEditRow).join("")}
+        </div>
+      ` : `<p class="muted">No sales logged for this day.</p>`}
     </section>
   `;
 }
@@ -506,6 +521,31 @@ function sortedSalesForDay(account, day) {
 }
 
 function saleEditRow(sale) {
+  const isEditing = state.editSaleId === sale.id;
+  const rowColor = brandColor(sale.brand);
+  const time = saleTimeLabel(sale);
+  return `
+    <div class="sale-table-item" style="--brand:${rowColor}">
+      <div class="sale-table-row">
+        <div class="sale-cell brand-cell">
+          <span class="brand-dot"></span>
+          <strong>${esc(sale.brand || "Unknown")}</strong>
+          ${time ? `<small>${esc(time)}</small>` : ""}
+        </div>
+        <div class="sale-cell model-cell">${esc(saleRowModel(sale))}</div>
+        <div class="sale-cell size-cell">${esc(saleRowSize(sale))}</div>
+        <div class="sale-cell price-cell">${money(sale.price)}</div>
+        <div class="sale-row-actions">
+          <button class="mini-btn" type="button" data-action="edit-sale" data-value="${esc(sale.id)}">${isEditing ? "Close" : "Edit"}</button>
+          <button class="mini-btn danger" type="button" data-action="delete-sale" data-value="${esc(sale.id)}">Del</button>
+        </div>
+      </div>
+      ${isEditing ? saleEditForm(sale) : ""}
+    </div>
+  `;
+}
+
+function saleEditForm(sale) {
   const isHisense = sale.brand === "Hisense";
   const isSoundbar = saleItemType(sale) === "soundbar";
   return `
@@ -529,6 +569,23 @@ function saleEditRow(sale) {
       </div>
     </form>
   `;
+}
+
+function saleRowModel(sale) {
+  if (sale.brand !== "Hisense") return "-";
+  return sale.model || "-";
+}
+
+function saleRowSize(sale) {
+  if (sale.brand !== "Hisense") return "-";
+  if (saleItemType(sale) === "soundbar") return "Soundbar";
+  return sale.size ? `${sale.size}"` : "-";
+}
+
+function saleTimeLabel(sale) {
+  const timestamp = Number(sale.createdAt || 0);
+  if (!timestamp) return "";
+  return new Date(timestamp).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 }
 
 function renderCommission(account) {
@@ -797,6 +854,7 @@ async function saveSaleEdit(data) {
   };
   mergeSales([updated]);
   persistSales();
+  state.editSaleId = "";
   toast("Sale updated.");
   render();
   await syncNow(false);
@@ -807,6 +865,7 @@ async function deleteSale(id) {
   if (!sale) return;
   state.sales = state.sales.filter((item) => item.id !== id);
   if (!state.deletedSales.includes(id)) state.deletedSales.push(id);
+  if (state.editSaleId === id) state.editSaleId = "";
   persistSales();
   writeJson(KEY.deletedSales, state.deletedSales);
   toast("Sale deleted locally.");
@@ -821,6 +880,7 @@ function changeSalesDay(direction) {
     const next = addDays(base, direction === "next" ? 1 : -1);
     state.salesDay = localIsoDate(next);
   }
+  state.editSaleId = "";
   render();
 }
 
@@ -1351,7 +1411,8 @@ function drawDashboardShareImage(ctx, layout, stats) {
   drawShareText(ctx, "Hisense Share of Value", 14, y + 28, 12, "#9dabc0", 800);
   drawShareText(ctx, `${stats.shareOfValue}%`, 14, y + 78, 46, sovColor, 900);
   drawShareText(ctx, `${money(stats.hisenseRevenue)} of ${money(stats.totalRevenue)} total value`, 14, y + 104, 12, "#9dabc0", 500);
-  drawShareGauge(ctx, stats, layout.width / 2, y + 120, Math.min(layout.width - 34, 360), sovColor);
+  const gaugeWidth = Math.min(layout.width - 38, 320);
+  drawShareGauge(ctx, stats, layout.width / 2, y + layout.sovHeight - 32, gaugeWidth, sovColor);
 
   y += layout.sovHeight + layout.gap;
   drawShareKpi(ctx, 0, y, layout.half, layout.smallHeight, "Hisense Units", String(stats.hisenseUnits), `of ${stats.totalUnits} total units across brands`, "#00aaa6");
@@ -1417,17 +1478,16 @@ function drawSharePremium(ctx, x, y, width, height, stats) {
   });
 }
 
-function drawShareGauge(ctx, stats, centerX, top, width, accent) {
+function drawShareGauge(ctx, stats, centerX, centerY, width, accent) {
   const scale = width / 240;
-  const centerY = top + 118 * scale;
   const radius = 92 * scale;
   const lineWidth = 16 * scale;
   ctx.save();
   ctx.lineWidth = lineWidth;
-  ctx.lineCap = "round";
+  ctx.lineCap = "butt";
   ctx.strokeStyle = "rgba(33,38,49,0.92)";
   ctx.beginPath();
-  ctx.arc(centerX, centerY, radius, percentAngle(0), percentAngle(100), true);
+  ctx.arc(centerX, centerY, radius, percentAngle(0), percentAngle(100));
   ctx.stroke();
 
   const arcSegments = brandArcSegments(stats);
@@ -1435,7 +1495,7 @@ function drawShareGauge(ctx, stats, centerX, top, width, accent) {
     ctx.lineCap = "butt";
     ctx.strokeStyle = shareArcGradient(ctx, item.color, centerY - radius, centerY + lineWidth);
     ctx.beginPath();
-    ctx.arc(centerX, centerY, radius, percentAngle(item.start), percentAngle(item.end), true);
+    ctx.arc(centerX, centerY, radius, percentAngle(item.start), percentAngle(item.end));
     ctx.stroke();
   }
   drawShareGaugeMarker(ctx, 10, centerX, centerY, scale);
@@ -1532,14 +1592,14 @@ function roundedRect(ctx, x, y, width, height, radius) {
 }
 
 function percentAngle(percent) {
-  return -((180 - (Math.max(0, Math.min(100, percent)) * 1.8)) * Math.PI / 180);
+  return Math.PI + (Math.max(0, Math.min(100, percent)) * Math.PI / 100);
 }
 
 function gaugeCanvasPoint(percent, centerX, centerY, radius) {
-  const angle = (180 - (Math.max(0, Math.min(100, percent)) * 1.8)) * Math.PI / 180;
+  const angle = percentAngle(percent);
   return {
     x: centerX + radius * Math.cos(angle),
-    y: centerY - radius * Math.sin(angle)
+    y: centerY + radius * Math.sin(angle)
   };
 }
 

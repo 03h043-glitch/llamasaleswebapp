@@ -308,7 +308,7 @@ h3 {
 
 .brand-share-track {
   stroke: rgba(33, 38, 49, 0.92);
-  stroke-linecap: round;
+  stroke-linecap: butt;
 }
 
 .brand-share-arc-segment {
@@ -319,7 +319,7 @@ h3 {
 .brand-share-highlight {
   fill: none;
   stroke: rgba(255, 255, 255, 0.18);
-  stroke-linecap: round;
+  stroke-linecap: butt;
   stroke-width: 4;
   transform: translateY(-4px);
   vector-effect: non-scaling-stroke;
@@ -693,14 +693,105 @@ select:disabled {
   background: rgba(0, 170, 166, 0.18);
 }
 
-.sales-list {
+.sales-table-card {
+  overflow: hidden;
+  padding: 0;
+}
+
+.sales-table {
   display: grid;
-  gap: 10px;
+}
+
+.sales-table-head,
+.sale-table-row {
+  display: grid;
+  grid-template-columns: 74px minmax(58px, 1fr) 58px 78px 76px;
+  gap: 6px;
+  align-items: center;
+}
+
+.sales-table-head {
+  min-height: 34px;
+  padding: 0 10px;
+  border-bottom: 1px solid rgba(120, 136, 166, 0.22);
+  color: var(--subtle);
+  font-size: 9px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.sale-table-item {
+  border-top: 1px solid rgba(120, 136, 166, 0.16);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--brand), transparent 84%), transparent 58%),
+    rgba(11, 13, 17, 0.36);
+}
+
+.sale-table-item:first-of-type {
+  border-top: 0;
+}
+
+.sale-table-row {
+  min-height: 54px;
+  padding: 7px 10px;
+}
+
+.sale-cell {
+  min-width: 0;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.brand-cell {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr);
+  column-gap: 6px;
+  row-gap: 1px;
+  align-items: center;
+}
+
+.brand-cell small {
+  grid-column: 2;
+  color: var(--subtle);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.brand-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--brand);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--brand), transparent 45%);
+}
+
+.price-cell {
+  color: var(--hisense);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.sale-row-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.mini-btn.danger {
+  border-color: rgba(236, 74, 74, 0.42);
+  color: #fecaca;
+  background: rgba(236, 74, 74, 0.1);
 }
 
 .sale-edit {
   display: grid;
   gap: 10px;
+  margin: 0 10px 10px;
   padding: 10px;
   border: 1px solid rgba(120, 136, 166, 0.28);
   border-radius: 12px;
