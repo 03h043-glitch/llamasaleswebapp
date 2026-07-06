@@ -1,9 +1,20 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "llamasaleswebapp",
+  "main": "./src/worker.js",
   "compatibility_date": "2026-07-04",
   "assets": {
     "directory": "./web",
     "not_found_handling": "single-page-application"
   }
+
+  // After creating the D1 database, add the binding below and replace database_id:
+  // ,
+  // "d1_databases": [
+  //   {
+  //     "binding": "DB",
+  //     "database_name": "llamasales-db",
+  //     "database_id": "REPLACE_WITH_D1_DATABASE_ID"
+  //   }
+  // ]
 }

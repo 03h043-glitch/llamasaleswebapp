@@ -6,9 +6,22 @@ const REGIONS = [
 
 const BRANDS = ["Hisense", "TCL", "LG", "Samsung", "Sony", "Other"];
 const MODELS = ["A4Q", "A5Q", "A6Q", "A7Q", "E7Q", "E7Q Pro", "U7Q", "U7Q Pro", "U8Q", "U7S", "U7S Pro", "UR8S", "UR9S", "C2", "C2 Ultra", "Other"];
+const SOUNDBAR_MODELS = ["AX3100Q", "AX5100Q", "AX5125H", "AX5125Q", "AX7100Q", "AX8100Q", "Other"];
 const SIZES = ["32", "40", "43", "50", "55", "65", "75", "85", "100", "Other"];
 const TIMEFRAMES = ["Today", "This Week", "Month to Date", "Year to Date"];
+const COMMISSION_VIEWS = ["Today", "Week", "Pay Day", "Year"];
 const SCOPES = ["Store", "Region"];
+const PAY_PERIODS_2026 = [
+  { payDate: "2026-05-25", weeks: [16, 17] },
+  { payDate: "2026-06-25", weeks: [18, 19, 20, 21, 22] },
+  { payDate: "2026-07-24", weeks: [23, 24, 25, 26] },
+  { payDate: "2026-08-25", weeks: [27, 28, 29, 30, 31] },
+  { payDate: "2026-09-25", weeks: [32, 33, 34, 35] },
+  { payDate: "2026-10-23", weeks: [36, 37, 38, 39] },
+  { payDate: "2026-11-25", weeks: [40, 41, 42, 43, 44] },
+  { payDate: "", label: "TBC", weeks: [45, 46, 47, 48] },
+  { payDate: "2027-01-25", weeks: [49, 50, 51, 52] }
+];
 const PREMIUM = [
   { label: "UHD", color: "var(--cyan)" },
   { label: "QLED", color: "var(--teal)" },
@@ -35,8 +48,10 @@ const KEY = {
   apiUrl: "llamasales.pwa.apiUrl",
   users: "llamasales.pwa.users",
   sales: "llamasales.pwa.sales",
+  deletedSales: "llamasales.pwa.deletedSales",
   rates: "llamasales.pwa.rates",
   meta: "llamasales.pwa.meta",
+  ui: "llamasales.pwa.ui",
   session: "llamasales.pwa.session",
   asmHash: "llamasales.pwa.asmHash",
   lastSync: "llamasales.pwa.lastSync"
@@ -51,10 +66,16 @@ const state = {
   apiUrl: localStorage.getItem(KEY.apiUrl) || defaultApiUrl(),
   users: readJson(KEY.users, []),
   sales: readJson(KEY.sales, []),
+  deletedSales: readJson(KEY.deletedSales, []),
   rates: readJson(KEY.rates, {}),
   session: readJson(KEY.session, null),
-  meta: readJson(KEY.meta, { regions: REGIONS, storesByRegion: {}, models: MODELS, sizes: SIZES }),
+  meta: readJson(KEY.meta, { regions: REGIONS, storesByRegion: {}, models: MODELS, soundbarModels: SOUNDBAR_MODELS, sizes: SIZES }),
   filters: { timeframe: "Today", scope: "Store" },
+  salesDay: todayIso(),
+  salesSort: "time",
+  commissionView: "Today",
+  selectedPayPeriod: "",
+  ui: readJson(KEY.ui, { commissionFloatHidden: false, commissionFloatX: null, commissionFloatY: null }),
   toast: ""
 };
 
@@ -75,8 +96,7 @@ app.addEventListener("click", async (event) => {
   const value = target.dataset.value || "";
 
   if (action === "menu") {
-    state.menuOpen = true;
-    render();
+    return;
   } else if (action === "auth-mode") {
     state.authMode = value === "register" ? "register" : "login";
     render();
@@ -100,6 +120,23 @@ app.addEventListener("click", async (event) => {
     render();
   } else if (action === "filter-scope") {
     state.filters.scope = value;
+    render();
+  } else if (action === "sales-day") {
+    changeSalesDay(value);
+  } else if (action === "sales-sort") {
+    state.salesSort = value || "time";
+    render();
+  } else if (action === "delete-sale") {
+    await deleteSale(value);
+  } else if (action === "commission-view") {
+    state.commissionView = value || "Today";
+    render();
+  } else if (action === "pay-period") {
+    state.selectedPayPeriod = value;
+    render();
+  } else if (action === "hide-commission-float") {
+    state.ui.commissionFloatHidden = true;
+    writeJson(KEY.ui, state.ui);
     render();
   } else if (action === "share") {
     shareDashboard();
@@ -126,7 +163,15 @@ app.addEventListener("change", (event) => {
     toggleNewStoreField(target.form, target.value === ADD_NEW_STORE);
   } else if (target.matches("[data-sale-brand]")) {
     toggleSaleFields(target.form, target.value === "Hisense");
+  } else if (target.matches("[data-sale-type]")) {
+    updateHisenseItemType(target.form, target.value);
   }
+});
+
+app.addEventListener("pointerdown", (event) => {
+  const target = event.target.closest("[data-drag-commission]");
+  if (!target || event.target.closest("button")) return;
+  startCommissionDrag(event, target);
 });
 
 app.addEventListener("focusin", (event) => {
@@ -156,6 +201,8 @@ app.addEventListener("submit", async (event) => {
     }
   } else if (formName === "sale") {
     await saveSale(data);
+  } else if (formName === "sale-edit") {
+    await saveSaleEdit(data);
   } else if (formName === "asm") {
     await unlockAsm(data);
   } else if (formName === "rate") {
@@ -256,7 +303,7 @@ function renderShell(account) {
   return `
     <main class="app">
       <header class="topbar">
-        <button class="icon-btn" data-action="menu" aria-label="Menu">${icon("menu")}</button>
+        <button class="icon-btn menu-disabled" data-action="menu" aria-label="Menu disabled" disabled>${icon("menu")}</button>
         <div class="brand-title">
           <strong>LlamaSales</strong>
           <span>${esc(subtitle(account))}</span>
@@ -273,12 +320,14 @@ function renderShell(account) {
 
       <nav class="bottom-nav">
         <button class="icon-btn ${state.page === "dashboard" ? "active" : ""}" data-action="dashboard" aria-label="Dashboard">${icon("home")}</button>
-        <button class="icon-btn ${state.page === "commission" ? "active" : ""}" data-action="page" data-value="commission" aria-label="Commission">${icon("commission")}</button>
+        <button class="icon-btn ${state.page === "todaySales" ? "active" : ""}" data-action="page" data-value="todaySales" aria-label="Today's sales">${icon("sales")}</button>
         <button class="icon-btn add" data-action="page" data-value="add" aria-label="Add sale">${icon("add")}</button>
+        <button class="icon-btn ${state.page === "commission" ? "active" : ""}" data-action="page" data-value="commission" aria-label="Commission">${icon("commission")}</button>
         <button class="icon-btn" data-action="share" aria-label="Share">${icon("share")}</button>
       </nav>
 
       ${state.menuOpen ? renderMenu() : ""}
+      ${state.page === "dashboard" ? renderCommissionFloat(account) : ""}
       ${toastHtml()}
     </main>
   `;
@@ -286,6 +335,7 @@ function renderShell(account) {
 
 function renderPage(account) {
   if (state.page === "add") return renderAddSale(account);
+  if (state.page === "todaySales") return renderTodaysSales(account);
   if (state.page === "commission") return renderCommission(account);
   if (state.page === "asm") return renderAsm(account);
   if (state.page === "config") return renderCommissionConfig();
@@ -307,6 +357,21 @@ function renderMenu() {
         <button class="button danger" data-action="sign-out">Sign out</button>
         <button class="button secondary" data-action="close-menu">Close</button>
       </div>
+    </div>
+  `;
+}
+
+function renderCommissionFloat(account) {
+  if (state.ui.commissionFloatHidden) return "";
+  const stats = commissionStats(account).today;
+  const style = Number.isFinite(state.ui.commissionFloatX) && Number.isFinite(state.ui.commissionFloatY)
+    ? `left:${state.ui.commissionFloatX}px;top:${state.ui.commissionFloatY}px;right:auto;bottom:auto;`
+    : "";
+  return `
+    <div class="commission-float" style="${style}" data-drag-commission>
+      <button class="float-close" data-action="hide-commission-float" aria-label="Hide daily commission">x</button>
+      <span>Today</span>
+      <strong>${money(stats.earnings)}</strong>
     </div>
   `;
 }
@@ -376,10 +441,17 @@ function renderAddSale(account) {
         <select name="brand" id="sale-brand" data-sale-brand required>${optionsWithPlaceholder(BRANDS, "Choose brand")}</select>
       </div>
       <div class="field" data-hisense-sale-field hidden>
-        <label>Hisense Model</label>
-        <select name="model">${optionsWithPlaceholder(modelOptions(), "Choose model")}</select>
+        <label>Hisense Item</label>
+        <select name="itemType" data-sale-type>
+          <option value="tv" selected>TV</option>
+          <option value="soundbar">Soundbar</option>
+        </select>
       </div>
       <div class="field" data-hisense-sale-field hidden>
+        <label>Hisense Model</label>
+        <select name="model" data-sale-model>${optionsWithPlaceholder(modelOptions(), "Choose model")}</select>
+      </div>
+      <div class="field" data-hisense-sale-field data-tv-only hidden>
         <label>Screen Size</label>
         <select name="size">${optionsWithPlaceholder(sizeOptions(), "Choose size")}</select>
       </div>
@@ -387,27 +459,93 @@ function renderAddSale(account) {
         <label>Sale Value</label>
         <input name="price" inputmode="decimal" placeholder="Example: 799" required>
       </div>
-      <div class="field" data-hisense-sale-field hidden>
-        <label>Soundbar Value</label>
-        <input name="soundbarRevenue" inputmode="decimal" placeholder="Leave blank if none">
-      </div>
       <button class="button">Complete Sale</button>
       <p class="muted">Sale will be saved locally and uploaded on the next successful sync.</p>
     </form>
   `;
 }
 
+function renderTodaysSales(account) {
+  const day = parseIsoDate(state.salesDay) || dateOnly(new Date());
+  const rows = sortedSalesForDay(account, day);
+  return `
+    <div class="page-heading-row">
+      <div>
+        <h2>Today's Sales</h2>
+        <p class="muted">${shortDate(day)} | ${rows.length} logged sale${rows.length === 1 ? "" : "s"}</p>
+      </div>
+      <div class="day-nav">
+        <button class="mini-btn" data-action="sales-day" data-value="prev">Prev</button>
+        <button class="mini-btn" data-action="sales-day" data-value="today">Today</button>
+        <button class="mini-btn" data-action="sales-day" data-value="next">Next</button>
+      </div>
+    </div>
+    <div class="segmented compact-tabs">
+      <div class="seg-row four">
+        ${buttonSeg("sales-sort", "time", "Time", state.salesSort === "time")}
+        ${buttonSeg("sales-sort", "brand", "Brand", state.salesSort === "brand")}
+        ${buttonSeg("sales-sort", "value", "Value", state.salesSort === "value")}
+        ${buttonSeg("sales-sort", "model", "Model", state.salesSort === "model")}
+      </div>
+    </div>
+    <section class="card sales-list">
+      ${rows.length ? rows.map(saleEditRow).join("") : `<p class="muted">No sales logged for this day.</p>`}
+    </section>
+  `;
+}
+
+function sortedSalesForDay(account, day) {
+  const rows = state.sales.filter((sale) => {
+    const saleDate = parseIsoDate(sale.date);
+    return saleDate && belongsTo(sale, account) && sameDate(saleDate, day);
+  });
+  if (state.salesSort === "brand") return rows.sort((a, b) => a.brand.localeCompare(b.brand) || Number(b.createdAt || 0) - Number(a.createdAt || 0));
+  if (state.salesSort === "value") return rows.sort((a, b) => Number(b.price || 0) - Number(a.price || 0));
+  if (state.salesSort === "model") return rows.sort((a, b) => saleName(a).localeCompare(saleName(b)));
+  return rows.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+}
+
+function saleEditRow(sale) {
+  const isHisense = sale.brand === "Hisense";
+  const isSoundbar = saleItemType(sale) === "soundbar";
+  return `
+    <form class="sale-edit" data-form="sale-edit">
+      <input type="hidden" name="id" value="${esc(sale.id)}">
+      <div class="sale-edit-title">
+        <strong>${esc(saleName(sale))}</strong>
+        <span class="muted">${esc(sale.date)} | ${money(sale.price)}</span>
+      </div>
+      <div class="sale-edit-grid">
+        <div class="field"><label>Date</label><input name="date" type="date" value="${esc(sale.date)}" required></div>
+        <div class="field"><label>Brand</label><select name="brand">${options(BRANDS, sale.brand)}</select></div>
+        <div class="field"><label>Type</label><select name="itemType"><option value="tv" ${!isSoundbar ? "selected" : ""}>TV</option><option value="soundbar" ${isSoundbar ? "selected" : ""}>Soundbar</option></select></div>
+        <div class="field"><label>Model</label><input name="model" value="${esc(isHisense ? sale.model : "")}" placeholder="Hisense only"></div>
+        <div class="field"><label>Size</label><input name="size" value="${esc(isHisense && !isSoundbar ? sale.size : "")}" placeholder="TV only"></div>
+        <div class="field"><label>Value</label><input name="price" inputmode="decimal" value="${esc(sale.price)}" required></div>
+      </div>
+      <div class="row-actions">
+        <button class="button secondary">Save</button>
+        <button class="button danger" type="button" data-action="delete-sale" data-value="${esc(sale.id)}">Delete</button>
+      </div>
+    </form>
+  `;
+}
+
 function renderCommission(account) {
   const stats = commissionStats(account);
+  const bucket = stats[commissionViewKey(state.commissionView)] || stats.today;
   return `
     <div>
       <h2>Commission Tracker</h2>
       <p class="muted">Paid Hisense sales for ${esc(account.username)}</p>
     </div>
+    <div class="segmented compact-tabs">
+      <div class="seg-row four">${COMMISSION_VIEWS.map((view) => buttonSeg("commission-view", view, view, state.commissionView === view)).join("")}</div>
+    </div>
+    ${state.commissionView === "Pay Day" ? renderPayPeriodPicker() : ""}
     <div class="grid">
-      ${kpi("Today", money(stats.todayEarnings), `${stats.todayUnits} paid Hisense units`, "var(--hisense)", "span-2")}
-      ${kpi("Pay Period", money(stats.periodEarnings), `${stats.periodUnits} units | ${shortDate(stats.periodStart)} to ${shortDate(stats.periodEnd)}`, "var(--gold)", "span-2")}
-      ${kpi("Year To Date", money(stats.ytdEarnings), `${stats.ytdUnits} paid Hisense units`, "var(--green)", "span-4")}
+      ${kpi(state.commissionView, money(bucket.earnings), `${bucket.units} paid Hisense items`, "var(--gold)", "span-4")}
+      ${kpi("Period", `${shortDate(bucket.start)} - ${shortDate(bucket.end)}`, state.commissionView === "Pay Day" ? payPeriodSubtitle(bucket.period) : "commission date range", "var(--hisense)", "span-4")}
     </div>
     <section class="card">
       <h3>Commission Rates</h3>
@@ -418,9 +556,33 @@ function renderCommission(account) {
     </section>
     <section class="card">
       <h3>Paid Sales</h3>
-      ${stats.entries.length ? stats.entries.slice(0, 8).map((entry) => listRow(saleName(entry.sale), `${entry.sale.date} | ${money(entry.sale.price)}`, money(entry.value))).join("") : `<p class="muted">No paid Hisense sales in this pay period.</p>`}
+      ${bucket.entries.length ? bucket.entries.slice(0, 20).map((entry) => listRow(saleName(entry.sale), `${entry.sale.date} | ${money(entry.sale.price)}`, money(entry.value))).join("") : `<p class="muted">No paid Hisense sales in this view.</p>`}
     </section>
   `;
+}
+
+function renderPayPeriodPicker() {
+  return `
+    <div class="pay-period-strip">
+      ${PAY_PERIODS_2026.map((period) => {
+        const key = payPeriodKey(period);
+        const active = key === payPeriodKey(selectedPayPeriod());
+        return `<button class="period-chip ${active ? "active" : ""}" data-action="pay-period" data-value="${esc(key)}">${esc(period.payDate ? shortDate(parseIsoDate(period.payDate)) : period.label)} <span>${esc(period.weeks.join(" | "))}</span></button>`;
+      }).join("")}
+    </div>
+  `;
+}
+
+function commissionViewKey(view) {
+  if (view === "Week") return "week";
+  if (view === "Pay Day") return "pay";
+  if (view === "Year") return "year";
+  return "today";
+}
+
+function payPeriodSubtitle(period) {
+  if (!period) return "pay calendar";
+  return `${period.payDate ? `paid ${shortDate(parseIsoDate(period.payDate))}` : "pay day TBC"} | weeks ${period.weeks.join(", ")}`;
 }
 
 function renderAsm(account) {
@@ -576,20 +738,25 @@ async function saveSale(data) {
     return;
   }
   const isHisense = brand === "Hisense";
-  if (isHisense && (!data.model || !data.size)) {
+  const itemType = isHisense && data.itemType === "soundbar" ? "soundbar" : "tv";
+  if (isHisense && !data.model) {
+    toast("Choose the Hisense model.");
+    return;
+  }
+  if (isHisense && itemType === "tv" && !data.size) {
     toast("Choose the Hisense model and screen size.");
     return;
   }
-  const soundbarRevenue = isHisense ? Number(data.soundbarRevenue || 0) : 0;
   const sale = {
     id: randomId(),
     date: todayIso(),
     brand,
+    itemType,
     model: isHisense ? data.model || "" : "",
-    size: isHisense ? data.size || "" : "",
+    size: isHisense && itemType === "tv" ? data.size || "" : "",
     price,
-    soundbarUnits: soundbarRevenue > 0 ? 1 : 0,
-    soundbarRevenue,
+    soundbarUnits: isHisense && itemType === "soundbar" ? 1 : 0,
+    soundbarRevenue: isHisense && itemType === "soundbar" ? price : 0,
     username: account.username,
     region: account.region,
     store: account.store,
@@ -601,6 +768,89 @@ async function saveSale(data) {
   toast("Sale saved.");
   render();
   await syncNow(false);
+}
+
+async function saveSaleEdit(data) {
+  const account = currentAccount();
+  const sale = state.sales.find((item) => item.id === data.id);
+  if (!account || !sale) return;
+  const brand = String(data.brand || "").trim();
+  const itemType = brand === "Hisense" && data.itemType === "soundbar" ? "soundbar" : "tv";
+  const price = Number(data.price || 0);
+  if (!brand || !price) {
+    toast("Choose a brand and enter a valid value.");
+    return;
+  }
+  const updated = {
+    ...sale,
+    date: String(data.date || sale.date || todayIso()),
+    brand,
+    itemType,
+    model: brand === "Hisense" ? String(data.model || "").trim() : "",
+    size: brand === "Hisense" && itemType === "tv" ? String(data.size || "").trim() : "",
+    price,
+    soundbarUnits: brand === "Hisense" && itemType === "soundbar" ? 1 : 0,
+    soundbarRevenue: brand === "Hisense" && itemType === "soundbar" ? price : 0,
+    username: account.username,
+    region: account.region,
+    store: account.store
+  };
+  mergeSales([updated]);
+  persistSales();
+  toast("Sale updated.");
+  render();
+  await syncNow(false);
+}
+
+async function deleteSale(id) {
+  const sale = state.sales.find((item) => item.id === id);
+  if (!sale) return;
+  state.sales = state.sales.filter((item) => item.id !== id);
+  if (!state.deletedSales.includes(id)) state.deletedSales.push(id);
+  persistSales();
+  writeJson(KEY.deletedSales, state.deletedSales);
+  toast("Sale deleted locally.");
+  render();
+  await syncNow(false);
+}
+
+function changeSalesDay(direction) {
+  const base = parseIsoDate(state.salesDay) || dateOnly(new Date());
+  if (direction === "today") state.salesDay = todayIso();
+  else {
+    const next = addDays(base, direction === "next" ? 1 : -1);
+    state.salesDay = localIsoDate(next);
+  }
+  render();
+}
+
+function startCommissionDrag(event, element) {
+  const rect = element.getBoundingClientRect();
+  const offsetX = event.clientX - rect.left;
+  const offsetY = event.clientY - rect.top;
+  element.setPointerCapture?.(event.pointerId);
+
+  function move(pointerEvent) {
+    const width = element.offsetWidth;
+    const height = element.offsetHeight;
+    const x = Math.max(8, Math.min(window.innerWidth - width - 8, pointerEvent.clientX - offsetX));
+    const y = Math.max(8, Math.min(window.innerHeight - height - 8, pointerEvent.clientY - offsetY));
+    element.style.left = `${x}px`;
+    element.style.top = `${y}px`;
+    element.style.right = "auto";
+    element.style.bottom = "auto";
+    state.ui.commissionFloatX = Math.round(x);
+    state.ui.commissionFloatY = Math.round(y);
+  }
+
+  function up() {
+    writeJson(KEY.ui, state.ui);
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+  }
+
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up, { once: true });
 }
 
 async function unlockAsm(data) {
@@ -686,7 +936,7 @@ async function syncNow(showResult) {
   if (state.syncInProgress) return;
   state.syncInProgress = true;
   try {
-    const payload = await apiPost("/api/sync", { ...authPayload(), sales: state.sales });
+    const payload = await apiPost("/api/sync", { ...authPayload(), sales: state.sales, deletedSaleIds: state.deletedSales });
     applyServerPayload(payload);
     if (showResult) toast("Sync complete.");
   } catch (error) {
@@ -772,6 +1022,9 @@ function applyMetaPayload(meta) {
   if (Array.isArray(meta.models)) {
     state.meta.models = cleanOptions(meta.models, MODELS);
   }
+  if (Array.isArray(meta.soundbarModels)) {
+    state.meta.soundbarModels = cleanOptions(meta.soundbarModels, SOUNDBAR_MODELS);
+  }
   if (Array.isArray(meta.sizes)) {
     state.meta.sizes = cleanOptions(meta.sizes, SIZES);
   }
@@ -784,6 +1037,10 @@ function modelOptions() {
 
 function sizeOptions() {
   return cleanOptions(state.meta.sizes, SIZES);
+}
+
+function soundbarModelOptions() {
+  return cleanOptions(state.meta.soundbarModels, SOUNDBAR_MODELS);
 }
 
 function cleanOptions(values, fallback) {
@@ -811,13 +1068,17 @@ function dashboardStats(account, timeframe, scope) {
   };
   for (const sale of state.sales) {
     if (!inScope(sale, account, scope) || !inTimeframe(sale, timeframe)) continue;
+    const itemType = saleItemType(sale);
     const saleValue = Number(sale.price || 0);
     const brand = BRANDS.includes(sale.brand) ? sale.brand : "Other";
+    if (sale.brand === "Hisense" && itemType === "soundbar") {
+      stats.soundbarUnits += 1;
+      stats.soundbarRevenue += saleValue;
+      continue;
+    }
     stats.totalUnits += 1;
     stats.totalRevenue += saleValue;
     stats.brandRevenue[brand] += saleValue;
-    stats.soundbarUnits += Number(sale.soundbarUnits || 0);
-    stats.soundbarRevenue += Number(sale.soundbarRevenue || 0);
     if (sale.brand === "Hisense") {
       stats.hisenseUnits += 1;
       stats.hisenseRevenue += saleValue;
@@ -835,30 +1096,39 @@ function dashboardStats(account, timeframe, scope) {
 
 function commissionStats(account) {
   const today = dateOnly(new Date());
-  const periodStart = currentPayPeriodStart(today);
-  const periodEnd = currentPayPeriodEnd(today);
+  const weekStart = commissionWeekStart(today);
+  const weekEnd = addDays(weekStart, 6);
+  const payPeriod = selectedPayPeriod();
+  const payRange = payPeriodRange(payPeriod);
   const yearStart = new Date(today.getFullYear(), 0, 1);
-  const stats = { todayUnits: 0, periodUnits: 0, ytdUnits: 0, todayEarnings: 0, periodEarnings: 0, ytdEarnings: 0, periodStart, periodEnd, entries: [] };
+  const stats = {
+    today: blankCommissionBucket(today, today),
+    week: blankCommissionBucket(weekStart, weekEnd),
+    pay: blankCommissionBucket(payRange.start, payRange.end, payPeriod),
+    year: blankCommissionBucket(yearStart, today)
+  };
   for (const sale of state.sales) {
     if (sale.brand !== "Hisense" || !belongsTo(sale, account)) continue;
     const saleDate = parseIsoDate(sale.date);
     if (!saleDate || saleDate > today) continue;
     const value = commissionValue(sale);
-    if (sameDate(saleDate, today)) {
-      stats.todayUnits += 1;
-      stats.todayEarnings += value;
-    }
-    if (saleDate >= yearStart) {
-      stats.ytdUnits += 1;
-      stats.ytdEarnings += value;
-    }
-    if (saleDate >= periodStart && saleDate <= periodEnd) {
-      stats.periodUnits += 1;
-      stats.periodEarnings += value;
-      stats.entries.push({ sale, value });
-    }
+    addCommissionEntry(stats.today, saleDate, sale, value);
+    addCommissionEntry(stats.week, saleDate, sale, value);
+    addCommissionEntry(stats.pay, saleDate, sale, value);
+    addCommissionEntry(stats.year, saleDate, sale, value);
   }
   return stats;
+}
+
+function blankCommissionBucket(start, end, period = null) {
+  return { units: 0, earnings: 0, start, end, period, entries: [] };
+}
+
+function addCommissionEntry(bucket, saleDate, sale, value) {
+  if (saleDate < bucket.start || saleDate > bucket.end) return;
+  bucket.units += 1;
+  bucket.earnings += value;
+  bucket.entries.push({ sale, value });
 }
 
 function regionStats() {
@@ -866,9 +1136,13 @@ function regionStats() {
   for (const sale of state.sales) {
     const region = regions.find((item) => item.region.toLowerCase() === canonicalRegion(sale.region).toLowerCase());
     if (!region) continue;
+    if (sale.brand === "Hisense" && saleItemType(sale) === "soundbar") {
+      region.soundbarUnits += 1;
+      region.commissionDue += commissionValue(sale);
+      continue;
+    }
     region.totalUnits += 1;
     region.totalRevenue += Number(sale.price || 0);
-    region.soundbarUnits += Number(sale.soundbarUnits || 0);
     if (sale.brand === "Hisense") {
       region.hisenseUnits += 1;
       region.hisenseRevenue += Number(sale.price || 0);
@@ -899,16 +1173,19 @@ function belongsTo(sale, account) {
   return account && (!sale.username || String(sale.username).toLowerCase() === String(account.username).toLowerCase());
 }
 
+function saleItemType(sale) {
+  return String(sale?.itemType || sale?.item_type || "").toLowerCase() === "soundbar" ? "soundbar" : "tv";
+}
+
 function inTimeframe(sale, timeframe) {
   const date = parseIsoDate(sale.date);
   if (!date) return timeframe === "Year to Date";
   const today = dateOnly(new Date());
   if (timeframe === "Today") return sameDate(date, today);
   if (timeframe === "This Week") {
-    const start = new Date(today);
-    const day = start.getDay() || 7;
-    start.setDate(start.getDate() - day + 1);
-    return date >= start && date <= today;
+    const start = retailWeekStart(today);
+    const end = addDays(start, 6);
+    return date >= start && date <= end;
   }
   if (timeframe === "Month to Date") return date >= new Date(today.getFullYear(), today.getMonth(), 1) && date <= today;
   if (timeframe === "Year to Date") return date >= new Date(today.getFullYear(), 0, 1) && date <= today;
@@ -925,10 +1202,16 @@ function premiumIndex(model) {
 }
 
 function commissionValue(sale) {
-  const key = `${sale.model || ""}|${sale.size || ""}`;
+  const key = commissionRateKey(sale);
   if (Object.prototype.hasOwnProperty.call(state.rates, key)) return Number(state.rates[key] || 0);
+  if (saleItemType(sale) === "soundbar") return OTHER_HISENSE_COMMISSION;
   const index = premiumIndex(sale.model);
   return index >= 0 ? DEFAULT_COMMISSION[index] : OTHER_HISENSE_COMMISSION;
+}
+
+function commissionRateKey(sale) {
+  if (saleItemType(sale) === "soundbar") return `soundbar|${sale.model || ""}|`;
+  return `${sale.model || ""}|${sale.size || ""}`;
 }
 
 function currentAccount() {
@@ -940,6 +1223,7 @@ function mergeSales(incoming) {
   const byId = new Map(state.sales.map((sale) => [sale.id, sale]));
   for (const sale of incoming) {
     if (!sale || !sale.id) continue;
+    if (state.deletedSales.includes(sale.id)) continue;
     byId.set(sale.id, normalizeSale(sale));
   }
   state.sales = Array.from(byId.values()).sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
@@ -950,11 +1234,12 @@ function normalizeSale(sale) {
     id: String(sale.id || randomId()),
     date: String(sale.date || todayIso()),
     brand: String(sale.brand || ""),
+    itemType: saleItemType(sale),
     model: String(sale.model || ""),
     size: String(sale.size || ""),
     price: Number(sale.price || 0),
-    soundbarUnits: Number(sale.soundbarUnits || 0),
-    soundbarRevenue: Number(sale.soundbarRevenue || 0),
+    soundbarUnits: saleItemType(sale) === "soundbar" ? 1 : Number(sale.soundbarUnits || 0),
+    soundbarRevenue: saleItemType(sale) === "soundbar" ? Number(sale.price || 0) : Number(sale.soundbarRevenue || 0),
     username: String(sale.username || ""),
     region: canonicalRegion(sale.region || ""),
     store: String(sale.store || ""),
@@ -1153,11 +1438,6 @@ function drawShareGauge(ctx, stats, centerX, top, width, accent) {
     ctx.arc(centerX, centerY, radius, percentAngle(item.start), percentAngle(item.end), true);
     ctx.stroke();
   }
-  const firstArc = arcSegments[0];
-  const lastArc = arcSegments[arcSegments.length - 1];
-  if (firstArc) drawShareGaugeCap(ctx, firstArc.start, firstArc.color, centerX, centerY, radius, lineWidth / 2);
-  if (lastArc) drawShareGaugeCap(ctx, lastArc.end, lastArc.color, centerX, centerY, radius, lineWidth / 2);
-
   drawShareGaugeMarker(ctx, 10, centerX, centerY, scale);
   drawShareGaugeMarker(ctx, 20, centerX, centerY, scale);
   drawShareGaugeLabel(ctx, "10%", 10, centerX, centerY, 116 * scale);
@@ -1181,14 +1461,6 @@ function drawShareGauge(ctx, stats, centerX, top, width, accent) {
   ctx.lineWidth = 2 * scale;
   ctx.stroke();
   ctx.restore();
-}
-
-function drawShareGaugeCap(ctx, percent, color, centerX, centerY, radius, capRadius) {
-  const point = gaugeCanvasPoint(percent, centerX, centerY, radius);
-  ctx.fillStyle = shareArcGradient(ctx, color, point.y - capRadius, point.y + capRadius);
-  ctx.beginPath();
-  ctx.arc(point.x, point.y, capRadius, 0, Math.PI * 2);
-  ctx.fill();
 }
 
 function drawShareGaugeMarker(ctx, percent, centerX, centerY, scale) {
@@ -1323,6 +1595,7 @@ function subtitle(account) {
   if (state.page === "config") return "Commission Config";
   if (state.page === "settings") return "Server Sync";
   if (state.page === "add") return "Add Sale";
+  if (state.page === "todaySales") return "Today's Sales";
   return account.store || "Dashboard";
 }
 
@@ -1350,8 +1623,6 @@ function brandShareBar(stats) {
   const segments = orderedBrandSegments(stats);
   const legendSegments = segments.filter((item) => item.value > 0 || item.brand === "Hisense");
   const arcSegments = brandArcSegments(stats);
-  const firstArc = arcSegments[0];
-  const lastArc = arcSegments[arcSegments.length - 1];
   const score = Math.max(0, Math.min(100, Number(stats.shareOfValue) || 0));
   const needle = gaugePoint(score, 76);
   const marker10 = gaugeMarker(10);
@@ -1368,8 +1639,6 @@ function brandShareBar(stats) {
           </defs>
           <path class="brand-share-track" d="${gaugeArc(0, 100)}"></path>
           ${arcSegments.map(brandShareArcSegment).join("")}
-          ${firstArc ? brandShareCap(firstArc, "start") : ""}
-          ${lastArc ? brandShareCap(lastArc, "end") : ""}
           <path class="brand-share-highlight" d="${gaugeArc(0, 100)}"></path>
           <line class="brand-share-threshold" x1="${marker10.inner.x}" y1="${marker10.inner.y}" x2="${marker10.outer.x}" y2="${marker10.outer.y}"></line>
           <line class="brand-share-threshold" x1="${marker20.inner.x}" y1="${marker20.inner.y}" x2="${marker20.outer.x}" y2="${marker20.outer.y}"></line>
@@ -1390,11 +1659,6 @@ function brandShareBar(stats) {
 
 function brandShareArcSegment(item) {
   return `<path class="brand-share-arc-segment" d="${gaugeArc(item.start, item.end)}" stroke="url(#${item.gradientId})" aria-label="${esc(item.brand)} ${shareLabel(item.pct)}"></path>`;
-}
-
-function brandShareCap(item, position) {
-  const point = gaugePoint(position === "start" ? item.start : item.end, 92);
-  return `<circle class="brand-share-cap" cx="${point.x}" cy="${point.y}" r="8" fill="url(#${item.gradientId})"></circle>`;
 }
 
 function brandShareGradient(item) {
@@ -1535,10 +1799,33 @@ function toggleSaleFields(form, showHisense) {
   form.querySelectorAll("[data-hisense-sale-field]").forEach((field) => {
     field.hidden = !showHisense;
     field.querySelectorAll("input, select").forEach((input) => {
-      input.required = showHisense && (input.name === "model" || input.name === "size");
+      input.required = showHisense && input.name === "model";
       if (!showHisense) input.value = "";
     });
   });
+  if (showHisense) {
+    if (form.elements.itemType) form.elements.itemType.value = form.elements.itemType.value || "tv";
+    updateHisenseItemType(form, form.elements.itemType?.value || "tv");
+  }
+}
+
+function updateHisenseItemType(form, itemType) {
+  if (!form) return;
+  const isSoundbar = itemType === "soundbar";
+  const model = form.querySelector("[data-sale-model]");
+  const sizeWrap = form.querySelector("[data-tv-only]");
+  if (model) {
+    model.innerHTML = optionsWithPlaceholder(isSoundbar ? soundbarModelOptions() : modelOptions(), isSoundbar ? "Choose soundbar model" : "Choose model");
+    model.value = "";
+  }
+  if (sizeWrap) {
+    sizeWrap.hidden = isSoundbar;
+    const size = sizeWrap.querySelector("select");
+    if (size) {
+      size.required = !isSoundbar;
+      if (isSoundbar) size.value = "";
+    }
+  }
 }
 
 function registerStoreOptions(region) {
@@ -1585,6 +1872,7 @@ function icon(name) {
   const paths = {
     menu: "M4 7h16v2H4zm0 4h16v2H4zm0 4h16v2H4z",
     home: "M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z",
+    sales: "M5 3h14a1 1 0 0 1 1 1v16l-3-2-3 2-3-2-3 2-3-2-3 2V4a1 1 0 0 1 1-1zm3 5h8V6H8zm0 4h8v-2H8zm0 4h5v-2H8z",
     commission: "M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zm3 2v2h10V8zm0 4v2h3v-2zm5 0v2h5v-2zm-5 4v2h3v-2zm5 0v2h5v-2z",
     add: "M11 4h2v7h7v2h-7v7h-2v-7H4v-2h7z",
     share: "M18 16.1c-1 0-1.9.4-2.5 1.1l-6.8-4c.1-.4.1-.8 0-1.2l6.8-4c.6.7 1.5 1.1 2.5 1.1a3.1 3.1 0 1 0-3.1-3.1c0 .2 0 .4.1.6l-6.9 4.1a3.1 3.1 0 1 0 0 4.6l6.9 4.1c0 .2-.1.4-.1.6a3.1 3.1 0 1 0 3.1-3.1z"
@@ -1602,7 +1890,7 @@ function money(value) {
 }
 
 function shortTime(value) {
-  if (value === "This Week") return "Week";
+  if (value === "This Week") return `Week ${retailWeekNumber(new Date())}`;
   if (value === "Month to Date") return "MTD";
   if (value === "Year to Date") return "YTD";
   return value;
@@ -1637,14 +1925,65 @@ function sameDate(a, b) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
-function currentPayPeriodStart(today) {
-  if (today.getDate() >= 26) return new Date(today.getFullYear(), today.getMonth(), 26);
-  return new Date(today.getFullYear(), today.getMonth() - 1, 26);
+function addDays(date, days) {
+  const copy = new Date(date);
+  copy.setDate(copy.getDate() + days);
+  return copy;
 }
 
-function currentPayPeriodEnd(today) {
-  const start = currentPayPeriodStart(today);
-  return new Date(start.getFullYear(), start.getMonth() + 1, 25);
+function retailWeekStart(date) {
+  const clean = dateOnly(date);
+  clean.setDate(clean.getDate() - clean.getDay());
+  return clean;
+}
+
+function commissionWeekStart(date) {
+  const clean = dateOnly(date);
+  const day = clean.getDay() || 7;
+  clean.setDate(clean.getDate() - day + 1);
+  return clean;
+}
+
+function retailWeekNumber(date) {
+  return isoWeekNumber(addDays(retailWeekStart(date), 1));
+}
+
+function commissionWeekNumber(date) {
+  return isoWeekNumber(commissionWeekStart(date));
+}
+
+function isoWeekNumber(date) {
+  const clean = dateOnly(date);
+  clean.setDate(clean.getDate() + 4 - (clean.getDay() || 7));
+  const yearStart = new Date(clean.getFullYear(), 0, 1);
+  return Math.ceil((((clean - yearStart) / 86400000) + 1) / 7);
+}
+
+function payPeriodForWeek(week) {
+  return PAY_PERIODS_2026.find((period) => period.weeks.includes(week)) || PAY_PERIODS_2026[0];
+}
+
+function selectedPayPeriod() {
+  const current = payPeriodForWeek(commissionWeekNumber(new Date()));
+  const key = state.selectedPayPeriod || payPeriodKey(current);
+  return PAY_PERIODS_2026.find((period) => payPeriodKey(period) === key) || current;
+}
+
+function payPeriodKey(period) {
+  return period.payDate || period.label || period.weeks.join("-");
+}
+
+function payPeriodRange(period) {
+  const starts = period.weeks.map((week) => commissionWeekDate(week, 2026));
+  const start = starts[0];
+  const end = addDays(starts[starts.length - 1], 6);
+  return { start, end };
+}
+
+function commissionWeekDate(week, year) {
+  const jan4 = new Date(year, 0, 4);
+  const start = commissionWeekStart(jan4);
+  return addDays(start, (week - 1) * 7);
 }
 
 function canonicalRegion(region) {

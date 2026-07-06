@@ -86,6 +86,12 @@ button {
   background: rgba(0, 170, 166, 0.18);
 }
 
+.icon-btn:disabled,
+.menu-disabled {
+  cursor: default;
+  opacity: 0.42;
+}
+
 .brand-title {
   min-width: 0;
 }
@@ -227,6 +233,13 @@ h3 {
   gap: 10px;
 }
 
+.page-heading-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+}
+
 .span-2 {
   grid-column: span 2;
 }
@@ -300,13 +313,6 @@ h3 {
 
 .brand-share-arc-segment {
   stroke-linecap: butt;
-  filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.34));
-}
-
-.brand-share-cap {
-  stroke: rgba(255, 255, 255, 0.16);
-  stroke-width: 1;
-  vector-effect: non-scaling-stroke;
   filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.34));
 }
 
@@ -443,6 +449,14 @@ h3 {
   font-size: 9px;
 }
 
+.compact-tabs {
+  padding: 5px;
+}
+
+.compact-tabs .seg {
+  height: 28px;
+}
+
 .field {
   display: grid;
   gap: 7px;
@@ -549,11 +563,11 @@ select:disabled {
   max-width: 520px;
   margin: 0 auto;
   display: grid;
-  grid-template-columns: 46px 46px 52px 46px;
+  grid-template-columns: 42px 42px 52px 42px 42px;
   align-items: center;
   justify-content: space-between;
-  gap: 18px;
-  padding: 6px 18px;
+  gap: 12px;
+  padding: 6px 14px;
   border-radius: 24px;
   border: 1px solid var(--stroke);
   background: var(--panel);
@@ -592,6 +606,118 @@ select:disabled {
 .drawer-panel button {
   text-align: left;
   justify-content: flex-start;
+}
+
+.commission-float {
+  position: fixed;
+  right: 16px;
+  bottom: calc(120px + env(safe-area-inset-bottom));
+  z-index: 18;
+  display: grid;
+  min-width: 112px;
+  gap: 1px;
+  padding: 9px 30px 9px 11px;
+  border: 1px solid rgba(0, 170, 166, 0.65);
+  border-radius: 14px;
+  background: rgba(10, 13, 19, 0.92);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45);
+  touch-action: none;
+}
+
+.commission-float span {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.commission-float strong {
+  color: var(--hisense);
+  font-size: 18px;
+}
+
+.float-close {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  width: 20px;
+  height: 20px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.day-nav,
+.row-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.mini-btn,
+.period-chip {
+  min-height: 30px;
+  border-radius: 10px;
+  padding: 0 9px;
+  border: 1px solid var(--field-stroke);
+  background: var(--field);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.pay-period-strip {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.period-chip {
+  display: grid;
+  gap: 1px;
+  min-width: 82px;
+  padding: 5px 8px;
+}
+
+.period-chip span {
+  font-size: 9px;
+  color: var(--subtle);
+}
+
+.period-chip.active,
+.mini-btn.active {
+  border-color: var(--hisense);
+  color: var(--ink);
+  background: rgba(0, 170, 166, 0.18);
+}
+
+.sales-list {
+  display: grid;
+  gap: 10px;
+}
+
+.sale-edit {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid rgba(120, 136, 166, 0.28);
+  border-radius: 12px;
+  background: rgba(11, 13, 17, 0.44);
+}
+
+.sale-edit-title {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.sale-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
 }
 
 .metric-row {
