@@ -1086,10 +1086,10 @@ function applyMetaPayload(meta) {
     state.meta.storesByRegion = meta.storesByRegion;
   }
   if (Array.isArray(meta.models)) {
-    state.meta.models = cleanOptions(meta.models, MODELS);
+    state.meta.models = sortedOptions(cleanOptions(meta.models, MODELS));
   }
   if (Array.isArray(meta.soundbarModels)) {
-    state.meta.soundbarModels = cleanOptions(meta.soundbarModels, SOUNDBAR_MODELS);
+    state.meta.soundbarModels = sortedOptions(cleanOptions(meta.soundbarModels, SOUNDBAR_MODELS));
   }
   if (Array.isArray(meta.sizes)) {
     state.meta.sizes = cleanOptions(meta.sizes, SIZES);
@@ -1098,7 +1098,7 @@ function applyMetaPayload(meta) {
 }
 
 function modelOptions() {
-  return cleanOptions(state.meta.models, MODELS);
+  return sortedOptions(cleanOptions(state.meta.models, MODELS));
 }
 
 function sizeOptions() {
@@ -1106,7 +1106,7 @@ function sizeOptions() {
 }
 
 function soundbarModelOptions() {
-  return cleanOptions(state.meta.soundbarModels, SOUNDBAR_MODELS);
+  return sortedOptions(cleanOptions(state.meta.soundbarModels, SOUNDBAR_MODELS));
 }
 
 function cleanOptions(values, fallback) {
@@ -1116,6 +1116,10 @@ function cleanOptions(values, fallback) {
     if (text && !clean.some((item) => item.toLowerCase() === text.toLowerCase())) clean.push(text);
   }
   return clean.length ? clean : fallback;
+}
+
+function sortedOptions(values) {
+  return [...values].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base", numeric: true }));
 }
 
 function dashboardStats(account, timeframe, scope) {

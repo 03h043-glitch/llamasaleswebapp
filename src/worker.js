@@ -164,6 +164,11 @@ async function handleAdmin(request, env, url) {
     await saveModel(db, clean(form.get("itemType")) === "soundbar" ? "soundbar" : "tv", clean(form.get("model")));
     return redirect("/admin");
   }
+  if (request.method === "POST" && url.pathname === "/admin/catalog/model/delete") {
+    const form = await request.formData();
+    await deleteModel(db, clean(form.get("itemType")) === "soundbar" ? "soundbar" : "tv", clean(form.get("model")));
+    return redirect("/admin");
+  }
   if (request.method === "POST" && url.pathname === "/admin/catalog/size/save") {
     const form = await request.formData();
     await saveSize(db, clean(form.get("size")));
@@ -339,6 +344,7 @@ function matrixSection(title, itemType, models, sizes, rates) {
         <form method="post" action="/admin/catalog/model/save"><input type="hidden" name="itemType" value="${itemType}"><label>Add TV Model</label><div class="inlineForm"><input name="model" placeholder="Model name"><button>Add</button></div></form>
         <form method="post" action="/admin/catalog/size/save"><label>Add Size</label><div class="inlineForm"><input name="size" placeholder="Screen size"><button>Add</button></div></form>
       </div>
+      ${modelDeleteList(itemType, models)}
       <form method="post" action="/admin/rates/batch-save" class="stackForm">
         <input type="hidden" name="itemType" value="${attr(itemType)}">
         <div class="actions matrixActions">
@@ -360,6 +366,7 @@ function soundbarSection(models, rates) {
       <div class="matrixTools">
         <form method="post" action="/admin/catalog/model/save"><input type="hidden" name="itemType" value="soundbar"><label>Add Soundbar Model</label><div class="inlineForm"><input name="model" placeholder="Soundbar model"><button>Add</button></div></form>
       </div>
+      ${modelDeleteList("soundbar", models)}
       <form method="post" action="/admin/rates/batch-save" class="stackForm">
         <input type="hidden" name="itemType" value="soundbar">
         <div class="actions matrixActions">
@@ -378,6 +385,24 @@ function rateInputCell(itemType, model, size, rates, blank = false) {
   const key = rateKey(itemType, model, size);
   const value = blank ? "" : rates[key] ?? "";
   return `<td><input type="hidden" name="combo" value="${attr(JSON.stringify({ itemType, model, size }))}"><input class="matrixInput" name="value" type="number" step="0.01" value="${attr(value)}" placeholder="-"></td>`;
+}
+
+function modelDeleteList(itemType, models) {
+  return `
+    <div class="modelDeleteList" aria-label="Delete ${itemType === "soundbar" ? "soundbar" : "TV"} models">
+      <div class="muted">Delete models from future dropdowns. Existing sales remain unchanged.</div>
+      <div class="modelChipGrid">
+        ${models.map((model) => `
+          <form method="post" action="/admin/catalog/model/delete" class="modelChip" onsubmit="return confirm('Delete ${attr(model)}? Existing sales will remain, but this model will disappear from future dropdowns.');">
+            <input type="hidden" name="itemType" value="${attr(itemType)}">
+            <input type="hidden" name="model" value="${attr(model)}">
+            <span>${escapeHtml(model)}</span>
+            <button class="danger" title="Delete ${attr(model)}">Delete</button>
+          </form>
+        `).join("")}
+      </div>
+    </div>
+  `;
 }
 
 async function datedRatesPage(db, itemType, saved = false) {
@@ -425,7 +450,7 @@ function page(title, body) {
 }
 
 function adminCss() {
-  return "body{margin:0;background:#05030a;color:#f8fafc;font-family:Segoe UI,Arial,sans-serif}main{max-width:1180px;margin:0 auto;padding:28px 18px 60px}h1{margin:0 0 4px;font-size:34px}h2{margin:0 0 14px;font-size:20px}.muted{color:#9dabc0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}.card{background:rgba(24,27,34,.82);border:1px solid rgba(114,126,166,.65);border-radius:14px;padding:16px;margin:14px 0}.auth{max-width:430px;margin:54px auto}.kpi{font-size:32px;font-weight:800;color:#00aaa6}label{display:block;font-size:12px;color:#9dabc0;margin:10px 0 4px}input,select{box-sizing:border-box;width:100%;height:38px;border-radius:10px;border:1px solid rgba(120,136,166,.7);background:#0b0d11;color:#fff;padding:0 10px}button,.buttonLink{display:inline-flex;align-items:center;justify-content:center;min-height:38px;border:0;border-radius:10px;background:#00aaa6;color:#fff;font-weight:700;padding:0 14px;cursor:pointer;text-decoration:none}.ghost{background:rgba(120,136,166,.16);border:1px solid rgba(120,136,166,.42);color:#dbeafe}.danger{background:#b21c2d}.row{display:grid;grid-template-columns:1.2fr 1.4fr 1fr 1fr auto;gap:8px;align-items:end}.userEdit{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end;border-top:1px solid rgba(120,136,166,.25);padding:10px 0}.userEditForm{display:grid;grid-template-columns:1.1fr 1.5fr 1fr 1fr 1fr auto;gap:8px;align-items:end}.table{width:100%;border-collapse:collapse}.table th,.table td{border-bottom:1px solid rgba(120,136,166,.35);padding:8px;text-align:left;font-size:13px}.pill{display:inline-block;border:1px solid rgba(0,170,166,.6);border-radius:999px;padding:4px 8px;color:#00aaa6;font-size:12px}.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.error{color:#ff8b8b;font-weight:700}.notice{color:#7df2c7;font-weight:700}.matrixTools{display:grid;grid-template-columns:repeat(2,minmax(180px,1fr));gap:10px;margin:10px 0 14px}.inlineForm{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}.stackForm{display:grid;gap:12px}.matrixActions{justify-content:flex-end;margin:4px 0}.datedHeader{display:grid;grid-template-columns:minmax(180px,260px) auto;gap:10px;align-items:end;margin:10px 0 14px}.matrixWrap{overflow:auto;border:1px solid rgba(120,136,166,.35);border-radius:12px}.matrix{width:100%;border-collapse:separate;border-spacing:0;min-width:760px}.soundbarMatrix{min-width:420px}.matrix th,.matrix td{border-bottom:1px solid rgba(120,136,166,.28);border-right:1px solid rgba(120,136,166,.2);padding:7px;text-align:left;font-size:12px}.matrix th{position:sticky;top:0;background:#10131a;z-index:1;color:#dbeafe}.matrix th:first-child{left:0;z-index:2}.matrix tbody th{top:auto;left:0;background:#10131a}.matrixInput{height:32px;padding:0 8px;min-width:74px}@media(max-width:980px){.userEdit,.userEditForm{grid-template-columns:1fr}.matrixTools{grid-template-columns:1fr}}@media(max-width:760px){.row,.datedHeader{grid-template-columns:1fr}.table{display:block;overflow:auto}}";
+  return "body{margin:0;background:#05030a;color:#f8fafc;font-family:Segoe UI,Arial,sans-serif}main{max-width:1180px;margin:0 auto;padding:28px 18px 60px}h1{margin:0 0 4px;font-size:34px}h2{margin:0 0 14px;font-size:20px}.muted{color:#9dabc0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}.card{background:rgba(24,27,34,.82);border:1px solid rgba(114,126,166,.65);border-radius:14px;padding:16px;margin:14px 0}.auth{max-width:430px;margin:54px auto}.kpi{font-size:32px;font-weight:800;color:#00aaa6}label{display:block;font-size:12px;color:#9dabc0;margin:10px 0 4px}input,select{box-sizing:border-box;width:100%;height:38px;border-radius:10px;border:1px solid rgba(120,136,166,.7);background:#0b0d11;color:#fff;padding:0 10px}button,.buttonLink{display:inline-flex;align-items:center;justify-content:center;min-height:38px;border:0;border-radius:10px;background:#00aaa6;color:#fff;font-weight:700;padding:0 14px;cursor:pointer;text-decoration:none}.ghost{background:rgba(120,136,166,.16);border:1px solid rgba(120,136,166,.42);color:#dbeafe}.danger{background:#b21c2d}.row{display:grid;grid-template-columns:1.2fr 1.4fr 1fr 1fr auto;gap:8px;align-items:end}.userEdit{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end;border-top:1px solid rgba(120,136,166,.25);padding:10px 0}.userEditForm{display:grid;grid-template-columns:1.1fr 1.5fr 1fr 1fr 1fr auto;gap:8px;align-items:end}.table{width:100%;border-collapse:collapse}.table th,.table td{border-bottom:1px solid rgba(120,136,166,.35);padding:8px;text-align:left;font-size:13px}.pill{display:inline-block;border:1px solid rgba(0,170,166,.6);border-radius:999px;padding:4px 8px;color:#00aaa6;font-size:12px}.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.error{color:#ff8b8b;font-weight:700}.notice{color:#7df2c7;font-weight:700}.matrixTools{display:grid;grid-template-columns:repeat(2,minmax(180px,1fr));gap:10px;margin:10px 0 14px}.modelDeleteList{display:grid;gap:8px;margin:0 0 12px}.modelChipGrid{display:flex;flex-wrap:wrap;gap:6px}.modelChip{display:inline-flex;align-items:center;gap:6px;min-height:30px;border:1px solid rgba(120,136,166,.3);border-radius:999px;background:rgba(11,13,17,.42);padding:3px 3px 3px 9px}.modelChip span{font-size:12px;color:#dbeafe}.modelChip button{min-height:24px;border-radius:999px;padding:0 8px;font-size:11px}.inlineForm{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}.stackForm{display:grid;gap:12px}.matrixActions{justify-content:flex-end;margin:4px 0}.datedHeader{display:grid;grid-template-columns:minmax(180px,260px) auto;gap:10px;align-items:end;margin:10px 0 14px}.matrixWrap{overflow:auto;border:1px solid rgba(120,136,166,.35);border-radius:12px}.matrix{width:100%;border-collapse:separate;border-spacing:0;min-width:760px}.soundbarMatrix{min-width:420px}.matrix th,.matrix td{border-bottom:1px solid rgba(120,136,166,.28);border-right:1px solid rgba(120,136,166,.2);padding:7px;text-align:left;font-size:12px}.matrix th{position:sticky;top:0;background:#10131a;z-index:1;color:#dbeafe}.matrix th:first-child{left:0;z-index:2}.matrix tbody th{top:auto;left:0;background:#10131a}.matrixInput{height:32px;padding:0 8px;min-width:74px}@media(max-width:980px){.userEdit,.userEditForm{grid-template-columns:1fr}.matrixTools{grid-template-columns:1fr}}@media(max-width:760px){.row,.datedHeader{grid-template-columns:1fr}.table{display:block;overflow:auto}}";
 }
 
 async function clientPayload(db, user) {
@@ -463,9 +488,18 @@ async function publicMeta(db) {
 }
 
 async function ensureDefaults(db) {
-  for (const [index, model] of TV_MODELS.entries()) await db.prepare("INSERT OR IGNORE INTO product_models (item_type,model,sort_order) VALUES ('tv',?,?)").bind(model, (index + 1) * 10).run();
-  for (const [index, model] of SOUNDBAR_MODELS.entries()) await db.prepare("INSERT OR IGNORE INTO product_models (item_type,model,sort_order) VALUES ('soundbar',?,?)").bind(model, (index + 1) * 10).run();
-  for (const [index, size] of SIZES.entries()) await db.prepare("INSERT OR IGNORE INTO product_sizes (size,sort_order) VALUES (?,?)").bind(size, (index + 1) * 10).run();
+  const tvCount = await db.prepare("SELECT COUNT(*) value FROM product_models WHERE item_type='tv'").first();
+  const soundbarCount = await db.prepare("SELECT COUNT(*) value FROM product_models WHERE item_type='soundbar'").first();
+  const sizeCount = await db.prepare("SELECT COUNT(*) value FROM product_sizes").first();
+  if (Number(tvCount?.value || 0) <= 0) {
+    for (const [index, model] of TV_MODELS.entries()) await db.prepare("INSERT OR IGNORE INTO product_models (item_type,model,sort_order) VALUES ('tv',?,?)").bind(model, (index + 1) * 10).run();
+  }
+  if (Number(soundbarCount?.value || 0) <= 0) {
+    for (const [index, model] of SOUNDBAR_MODELS.entries()) await db.prepare("INSERT OR IGNORE INTO product_models (item_type,model,sort_order) VALUES ('soundbar',?,?)").bind(model, (index + 1) * 10).run();
+  }
+  if (Number(sizeCount?.value || 0) <= 0) {
+    for (const [index, size] of SIZES.entries()) await db.prepare("INSERT OR IGNORE INTO product_sizes (size,sort_order) VALUES (?,?)").bind(size, (index + 1) * 10).run();
+  }
 }
 
 async function ensureSchema(db) {
@@ -574,7 +608,7 @@ function rateKey(itemType, model, size) {
 }
 
 async function modelList(db, itemType) {
-  return (await all(db, "SELECT model FROM product_models WHERE item_type=? ORDER BY sort_order, model", itemType)).map((row) => row.model);
+  return (await all(db, "SELECT model FROM product_models WHERE item_type=? ORDER BY lower(model), model", itemType)).map((row) => row.model);
 }
 
 async function sizeList(db) {
@@ -585,6 +619,13 @@ async function saveModel(db, itemType, model) {
   if (!model) return;
   const max = await db.prepare("SELECT COALESCE(MAX(sort_order),0) maxSort FROM product_models WHERE item_type=?").bind(itemType).first();
   await db.prepare("INSERT OR IGNORE INTO product_models (item_type,model,sort_order) VALUES (?,?,?)").bind(itemType, model, Number(max?.maxSort || 0) + 10).run();
+}
+
+async function deleteModel(db, itemType, model) {
+  if (!model) return;
+  await db.prepare("DELETE FROM product_models WHERE item_type=? AND model=?").bind(itemType, model).run();
+  await db.prepare("DELETE FROM commission_rates WHERE item_type=? AND model=?").bind(itemType, model).run();
+  await db.prepare("DELETE FROM commission_rate_history WHERE item_type=? AND model=?").bind(itemType, model).run();
 }
 
 async function saveSize(db, size) {
