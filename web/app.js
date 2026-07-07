@@ -52,7 +52,7 @@ const OTHER_HISENSE_COMMISSION = 5;
 const PRODUCTION_DOMAIN = "tiredllama.co.uk";
 const PRODUCTION_API_URL = "https://api.tiredllama.co.uk";
 const ADD_NEW_STORE = "__add_new_store__";
-const DASHBOARD_ACCENT = "var(--blue)";
+const DASHBOARD_ACCENT = "var(--hisense)";
 const BRAND_COLORS = {
   Hisense: "#00aaa6",
   TCL: "#ed1c24",
@@ -62,22 +62,29 @@ const BRAND_COLORS = {
   Other: "#cbd5e1"
 };
 const APP_BUILD = {
-  version: "v20",
-  baseCommit: "c0a4bb2",
+  version: "v21",
+  baseCommit: "103079d",
   repo: "03h043-glitch/llamasaleswebapp"
 };
 const DEFAULT_APPEARANCE = { theme: "dark", palette: "default" };
 const PALETTES = [
-  { id: "default", name: "Blue Teal", primary: "#5096ff", secondary: "#00aaa6", contrast: "#ffffff" },
-  { id: "emerald", name: "Emerald Cyan", primary: "#047857", secondary: "#0891b2", contrast: "#ffffff" },
-  { id: "indigo", name: "Indigo Rose", primary: "#4f46e5", secondary: "#be123c", contrast: "#ffffff" },
-  { id: "amber", name: "Amber Violet", primary: "#b45309", secondary: "#7c3aed", contrast: "#ffffff" },
-  { id: "coral", name: "Coral Sky", primary: "#c2410c", secondary: "#0284c7", contrast: "#ffffff" },
-  { id: "forest", name: "Forest Lime", primary: "#15803d", secondary: "#4d7c0f", contrast: "#ffffff" },
-  { id: "magenta", name: "Magenta Cyan", primary: "#a21caf", secondary: "#0e7490", contrast: "#ffffff" },
-  { id: "crimson", name: "Crimson Gold", primary: "#b91c1c", secondary: "#a16207", contrast: "#ffffff" },
-  { id: "slate", name: "Slate Aqua", primary: "#475569", secondary: "#0f766e", contrast: "#ffffff" },
-  { id: "plum", name: "Plum Orange", primary: "#6d28d9", secondary: "#ea580c", contrast: "#ffffff" }
+  { id: "default", name: "Hisense Teal", color: "#00aaa6", contrast: "#ffffff" },
+  { id: "pastel-red", name: "Pastel Red", color: "#e57373", contrast: "#111827" },
+  { id: "neon-red", name: "Neon Red", color: "#ff1744", contrast: "#ffffff" },
+  { id: "pastel-orange", name: "Pastel Orange", color: "#f28c38", contrast: "#111827" },
+  { id: "neon-orange", name: "Neon Orange", color: "#ff6d00", contrast: "#111827" },
+  { id: "pastel-yellow", name: "Pastel Yellow", color: "#b8860b", contrast: "#111827" },
+  { id: "neon-yellow", name: "Neon Yellow", color: "#f9a825", contrast: "#111827" },
+  { id: "pastel-green", name: "Pastel Green", color: "#43a047", contrast: "#ffffff" },
+  { id: "neon-green", name: "Neon Green", color: "#00c853", contrast: "#111827" },
+  { id: "pastel-teal", name: "Pastel Teal", color: "#26a69a", contrast: "#111827" },
+  { id: "neon-teal", name: "Neon Teal", color: "#00e5c8", contrast: "#111827" },
+  { id: "pastel-blue", name: "Pastel Blue", color: "#5c8fd6", contrast: "#ffffff" },
+  { id: "neon-blue", name: "Neon Blue", color: "#2979ff", contrast: "#ffffff" },
+  { id: "pastel-purple", name: "Pastel Purple", color: "#8e7cc3", contrast: "#ffffff" },
+  { id: "neon-purple", name: "Neon Purple", color: "#a855f7", contrast: "#ffffff" },
+  { id: "pastel-pink", name: "Pastel Pink", color: "#d36aa0", contrast: "#111827" },
+  { id: "neon-pink", name: "Neon Pink", color: "#ff2bd6", contrast: "#ffffff" }
 ];
 
 const KEY = {
@@ -459,8 +466,8 @@ function renderUserPanel(account) {
 
 function paletteButton(palette, active) {
   return `
-    <button class="palette-option ${active ? "active" : ""}" data-action="pref-palette" data-value="${esc(palette.id)}" style="--p1:${palette.primary};--p2:${palette.secondary};">
-      <span class="palette-swatch"><i></i><i></i></span>
+    <button class="palette-option ${active ? "active" : ""}" data-action="pref-palette" data-value="${esc(palette.id)}" style="--palette-color:${palette.color};">
+      <span class="palette-swatch"></span>
       <span>${esc(palette.name)}</span>
     </button>
   `;
@@ -1277,7 +1284,10 @@ function applyMetaPayload(meta) {
 
 function appearancePrefs(account = currentAccount()) {
   const key = appearanceKey(account);
-  return { ...DEFAULT_APPEARANCE, ...(state.preferences[key] || {}) };
+  const prefs = { ...DEFAULT_APPEARANCE, ...(state.preferences[key] || {}) };
+  if (!PALETTES.some((palette) => palette.id === prefs.palette)) prefs.palette = DEFAULT_APPEARANCE.palette;
+  if (prefs.theme !== "light") prefs.theme = "dark";
+  return prefs;
 }
 
 function appearanceKey(account = currentAccount()) {
@@ -1302,8 +1312,8 @@ function applyAppearance(account = currentAccount()) {
   const palette = activePalette(account);
   const root = document.documentElement;
   root.dataset.theme = prefs.theme === "light" ? "light" : "dark";
-  root.style.setProperty("--blue", palette.primary);
-  root.style.setProperty("--hisense", palette.secondary);
+  root.style.setProperty("--blue", palette.color);
+  root.style.setProperty("--hisense", palette.color);
   root.style.setProperty("--accent-contrast", palette.contrast || "#ffffff");
 }
 

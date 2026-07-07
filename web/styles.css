@@ -15,7 +15,7 @@
   --green: #1cb973;
   --yellow: #f5b232;
   --red: #ec4a4a;
-  --blue: #5096ff;
+  --blue: #00aaa6;
   --violet: #b868ff;
   --orange: #ff8b46;
   --cyan: #22d3ee;
@@ -712,26 +712,13 @@ select:disabled {
 }
 
 .palette-swatch {
-  display: inline-flex;
+  display: inline-block;
   width: 28px;
   height: 18px;
   border-radius: 999px;
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.28);
-}
-
-.palette-swatch i {
-  display: block;
-  width: 50%;
-  height: 100%;
-}
-
-.palette-swatch i:first-child {
-  background: var(--p1);
-}
-
-.palette-swatch i:last-child {
-  background: var(--p2);
+  background: var(--palette-color);
+  border: 1px solid color-mix(in srgb, var(--palette-color), white 44%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
 }
 
 .drawer-panel button {
@@ -748,7 +735,7 @@ select:disabled {
   min-width: 112px;
   gap: 1px;
   padding: 9px 30px 9px 11px;
-  border: 1px solid rgba(0, 170, 166, 0.65);
+  border: 1px solid color-mix(in srgb, var(--hisense), transparent 35%);
   border-radius: 14px;
   background: rgba(10, 13, 19, 0.92);
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.45);
