@@ -61,6 +61,24 @@ const BRAND_COLORS = {
   Sony: "#000000",
   Other: "#cbd5e1"
 };
+const APP_BUILD = {
+  version: "v20",
+  baseCommit: "c0a4bb2",
+  repo: "03h043-glitch/llamasaleswebapp"
+};
+const DEFAULT_APPEARANCE = { theme: "dark", palette: "default" };
+const PALETTES = [
+  { id: "default", name: "Blue Teal", primary: "#5096ff", secondary: "#00aaa6", contrast: "#ffffff" },
+  { id: "emerald", name: "Emerald Cyan", primary: "#047857", secondary: "#0891b2", contrast: "#ffffff" },
+  { id: "indigo", name: "Indigo Rose", primary: "#4f46e5", secondary: "#be123c", contrast: "#ffffff" },
+  { id: "amber", name: "Amber Violet", primary: "#b45309", secondary: "#7c3aed", contrast: "#ffffff" },
+  { id: "coral", name: "Coral Sky", primary: "#c2410c", secondary: "#0284c7", contrast: "#ffffff" },
+  { id: "forest", name: "Forest Lime", primary: "#15803d", secondary: "#4d7c0f", contrast: "#ffffff" },
+  { id: "magenta", name: "Magenta Cyan", primary: "#a21caf", secondary: "#0e7490", contrast: "#ffffff" },
+  { id: "crimson", name: "Crimson Gold", primary: "#b91c1c", secondary: "#a16207", contrast: "#ffffff" },
+  { id: "slate", name: "Slate Aqua", primary: "#475569", secondary: "#0f766e", contrast: "#ffffff" },
+  { id: "plum", name: "Plum Orange", primary: "#6d28d9", secondary: "#ea580c", contrast: "#ffffff" }
+];
 
 const KEY = {
   apiUrl: "llamasales.pwa.apiUrl",
@@ -71,6 +89,7 @@ const KEY = {
   rateHistory: "llamasales.pwa.rateHistory",
   meta: "llamasales.pwa.meta",
   ui: "llamasales.pwa.ui",
+  preferences: "llamasales.pwa.preferences",
   session: "llamasales.pwa.session",
   asmHash: "llamasales.pwa.asmHash",
   lastSync: "llamasales.pwa.lastSync"
@@ -97,6 +116,9 @@ const state = {
   commissionView: "Today",
   selectedPayPeriod: "",
   ui: readJson(KEY.ui, { commissionFloatHidden: false, commissionFloatX: null, commissionFloatY: null }),
+  preferences: readJson(KEY.preferences, {}),
+  userPanelOpen: false,
+  repoCommit: "",
   toast: ""
 };
 
@@ -108,6 +130,7 @@ if ("serviceWorker" in navigator) {
 
 render();
 loadMeta();
+loadRepoCommit();
 syncDaily();
 
 app.addEventListener("click", async (event) => {
@@ -124,9 +147,22 @@ app.addEventListener("click", async (event) => {
   } else if (action === "close-menu") {
     state.menuOpen = false;
     render();
+  } else if (action === "user-panel") {
+    state.userPanelOpen = !state.userPanelOpen;
+    render();
+  } else if (action === "close-user-panel") {
+    state.userPanelOpen = false;
+    render();
+  } else if (action === "pref-theme") {
+    saveAppearance({ theme: value === "light" ? "light" : "dark" });
+    render();
+  } else if (action === "pref-palette") {
+    if (PALETTES.some((palette) => palette.id === value)) saveAppearance({ palette: value });
+    render();
   } else if (action === "page") {
     state.page = value;
     state.menuOpen = false;
+    state.userPanelOpen = false;
     render();
     if (value === "commission") {
       await loadMeta();
@@ -138,6 +174,7 @@ app.addEventListener("click", async (event) => {
   } else if (action === "sign-out") {
     state.session = null;
     state.asmUnlocked = false;
+    state.userPanelOpen = false;
     writeJson(KEY.session, null);
     state.menuOpen = false;
     render();
@@ -241,6 +278,7 @@ app.addEventListener("submit", async (event) => {
 
 function render() {
   const account = currentAccount();
+  applyAppearance(account);
   app.innerHTML = account ? renderShell(account) : renderAuth();
 }
 
@@ -337,10 +375,10 @@ function renderShell(account) {
           <strong>${esc(account.store || "LlamaSales")}</strong>
           <span>${esc(account.region || "")}</span>
         </div>
-        <div class="status-pill">
+        <button class="status-pill" data-action="user-panel" aria-label="User display settings">
           <span class="dot"></span>
           <span class="status-copy"><small>Signed in</small><span>${esc(account.username)}</span></span>
-        </div>
+        </button>
       </header>
 
       <section class="content stack">
@@ -356,6 +394,7 @@ function renderShell(account) {
       </nav>
 
       ${state.menuOpen ? renderMenu() : ""}
+      ${state.userPanelOpen ? renderUserPanel(account) : ""}
       ${state.page === "dashboard" ? renderCommissionFloat(account) : ""}
       ${toastHtml()}
     </main>
@@ -387,6 +426,43 @@ function renderMenu() {
         <button class="button secondary" data-action="close-menu">Close</button>
       </div>
     </div>
+  `;
+}
+
+function renderUserPanel(account) {
+  const prefs = appearancePrefs(account);
+  return `
+    <section class="user-panel card stack">
+      <div class="user-panel-head">
+        <div>
+          <h3>${esc(account.username)}</h3>
+          <p class="muted">${esc(account.store || "")}${account.region ? ` | ${esc(account.region)}` : ""}</p>
+        </div>
+        <button class="mini-btn" data-action="close-user-panel">Close</button>
+      </div>
+      <div class="field">
+        <label>Mode</label>
+        <div class="seg-row two pref-toggle">
+          ${buttonSeg("pref-theme", "dark", "Dark", prefs.theme !== "light")}
+          ${buttonSeg("pref-theme", "light", "Light", prefs.theme === "light")}
+        </div>
+      </div>
+      <div class="field">
+        <label>Accent Palette</label>
+        <div class="palette-grid">
+          ${PALETTES.map((palette) => paletteButton(palette, prefs.palette === palette.id)).join("")}
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function paletteButton(palette, active) {
+  return `
+    <button class="palette-option ${active ? "active" : ""}" data-action="pref-palette" data-value="${esc(palette.id)}" style="--p1:${palette.primary};--p2:${palette.secondary};">
+      <span class="palette-swatch"><i></i><i></i></span>
+      <span>${esc(palette.name)}</span>
+    </button>
   `;
 }
 
@@ -454,8 +530,14 @@ function renderDashboard(account) {
       </div>
 
       ${premiumMix(stats)}
+      ${buildMarker()}
     </div>
   `;
+}
+
+function buildMarker() {
+  const repo = state.repoCommit ? `repo ${state.repoCommit}` : "repo ...";
+  return `<div class="build-marker">bundle ${esc(APP_BUILD.version)} | base ${esc(APP_BUILD.baseCommit)} | ${esc(repo)}</div>`;
 }
 
 function renderAddSale(account) {
@@ -1045,6 +1127,20 @@ async function syncDaily() {
   }
 }
 
+async function loadRepoCommit() {
+  try {
+    const response = await fetch(`https://api.github.com/repos/${APP_BUILD.repo}/commits/main`, { cache: "no-store" });
+    if (!response.ok) return;
+    const payload = await response.json();
+    const sha = String(payload?.sha || "").slice(0, 7);
+    if (!sha) return;
+    state.repoCommit = sha;
+    if (state.page === "dashboard") render();
+  } catch {
+    // Build marker is diagnostic only.
+  }
+}
+
 async function loadMeta() {
   if (!state.apiUrl) return;
   try {
@@ -1177,6 +1273,38 @@ function applyMetaPayload(meta) {
     state.meta.modelCategories = DEFAULT_MODEL_CATEGORIES;
   }
   writeJson(KEY.meta, state.meta);
+}
+
+function appearancePrefs(account = currentAccount()) {
+  const key = appearanceKey(account);
+  return { ...DEFAULT_APPEARANCE, ...(state.preferences[key] || {}) };
+}
+
+function appearanceKey(account = currentAccount()) {
+  return account?.username ? String(account.username).toLowerCase() : "default";
+}
+
+function activePalette(account = currentAccount()) {
+  const prefs = appearancePrefs(account);
+  return PALETTES.find((palette) => palette.id === prefs.palette) || PALETTES[0];
+}
+
+function saveAppearance(partial) {
+  const account = currentAccount();
+  const key = appearanceKey(account);
+  state.preferences[key] = { ...appearancePrefs(account), ...partial };
+  writeJson(KEY.preferences, state.preferences);
+  applyAppearance(account);
+}
+
+function applyAppearance(account = currentAccount()) {
+  const prefs = appearancePrefs(account);
+  const palette = activePalette(account);
+  const root = document.documentElement;
+  root.dataset.theme = prefs.theme === "light" ? "light" : "dark";
+  root.style.setProperty("--blue", palette.primary);
+  root.style.setProperty("--hisense", palette.secondary);
+  root.style.setProperty("--accent-contrast", palette.contrast || "#ffffff");
 }
 
 function modelOptions() {
@@ -1458,6 +1586,7 @@ function persistSales() {
 function goDashboard() {
   state.page = "dashboard";
   state.menuOpen = false;
+  state.userPanelOpen = false;
   state.filters = { timeframe: "Today", scope: "Store" };
   render();
 }
