@@ -1134,10 +1134,8 @@ select:disabled {
 
 .barcode-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(118px, 148px);
-  gap: 10px;
-  align-items: center;
-  padding: 10px;
+  gap: 9px;
+  padding: 11px;
   border: 1px solid rgba(120, 136, 166, 0.24);
   border-radius: 12px;
   background: linear-gradient(90deg, color-mix(in srgb, var(--hisense), transparent 88%), transparent 56%), var(--field);
@@ -1147,6 +1145,13 @@ select:disabled {
   min-width: 0;
   display: grid;
   gap: 3px;
+}
+
+.barcode-title-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: start;
 }
 
 .barcode-copy strong,
@@ -1173,14 +1178,44 @@ select:disabled {
 
 .barcode-edit-btn {
   width: fit-content;
-  margin-top: 2px;
+}
+
+.barcode-model-list {
+  display: grid;
+  gap: 6px;
+}
+
+.barcode-model-line {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.barcode-model-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  max-width: 150px;
+  padding: 0 9px;
+  border-radius: 999px;
+  background: var(--blue);
+  color: var(--accent-contrast);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .barcode-art {
   display: grid;
   justify-items: center;
   gap: 2px;
-  padding: 6px;
+  width: 100%;
+  padding: 8px;
   border-radius: 10px;
   background: #fff;
   color: #111827;
@@ -1188,7 +1223,7 @@ select:disabled {
 
 .barcode-svg {
   width: 100%;
-  height: 44px;
+  height: 68px;
   fill: currentColor;
 }
 

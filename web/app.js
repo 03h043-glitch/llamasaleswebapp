@@ -62,8 +62,8 @@ const BRAND_COLORS = {
   Other: "#cbd5e1"
 };
 const APP_BUILD = {
-  version: "v25",
-  baseCommit: "ac9da82",
+  version: "v26",
+  baseCommit: "0717c33",
   repo: "03h043-glitch/llamasaleswebapp"
 };
 const DEFAULT_APPEARANCE = { theme: "dark", palette: "default" };
@@ -846,10 +846,19 @@ function barcodeCard(barcode) {
   return `
     <article class="barcode-item">
       <div class="barcode-copy">
-        <strong>${esc(barcode.description || "Barcode offer")}</strong>
-        <span>${esc(barcodeModelLabel(barcode))}</span>
+        <div class="barcode-title-row">
+          <strong>${esc(barcode.description || "Barcode offer")}</strong>
+          <button class="mini-btn barcode-edit-btn" type="button" data-action="edit-barcode" data-value="${esc(barcode.id)}">Edit</button>
+        </div>
         <small>${esc(dates)}</small>
-        <button class="mini-btn barcode-edit-btn" type="button" data-action="edit-barcode" data-value="${esc(barcode.id)}">Edit</button>
+      </div>
+      <div class="barcode-model-list">
+        ${barcodeComboGroups(barcode).map(([model, sizes]) => `
+          <div class="barcode-model-line">
+            <span class="barcode-model-chip">${esc(model)}</span>
+            <span>${esc(sizes.map((size) => `${size}"`).join("  "))}</span>
+          </div>
+        `).join("")}
       </div>
       <div class="barcode-art">
         ${barcodeSvg(barcode.code)}
@@ -1521,8 +1530,7 @@ function applyMetaPayload(meta) {
     writeJson(KEY.rateHistory, state.rateHistory);
   }
   if (Array.isArray(meta.barcodes)) {
-    state.barcodes = meta.barcodes.map(normalizeBarcode).filter(Boolean);
-    writeJson(KEY.barcodes, state.barcodes);
+    mergeBarcodes(meta.barcodes);
   }
   if (meta.modelCategories && typeof meta.modelCategories === "object") {
     state.meta.modelCategories = normalizeModelCategories(meta.modelCategories);
@@ -1611,7 +1619,12 @@ function barcodeComboGroups(barcode) {
 }
 
 function mergeBarcodes(items) {
-  const map = new Map(state.barcodes.map((barcode) => [barcode.id, barcode]));
+  const today = todayIso();
+  const map = new Map(state.barcodes
+    .map(normalizeBarcode)
+    .filter(Boolean)
+    .filter((barcode) => barcode.endDate >= today)
+    .map((barcode) => [barcode.id, barcode]));
   for (const item of items) {
     const barcode = normalizeBarcode(item);
     if (barcode) map.set(barcode.id, barcode);

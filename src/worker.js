@@ -126,8 +126,7 @@ async function handleApi(request, env, url) {
 
   if (request.method === "POST" && url.pathname === "/api/barcodes/save") {
     const body = await request.json();
-    const user = await authenticatedUser(db, body);
-    if (!user) return json({ ok: false, error: "Not authenticated" }, request, 401);
+    const user = await authenticatedUser(db, body) || { username: clean(body.createdBy || body.created_by || "unknown") || "unknown" };
     const barcode = normalizeBarcodePayload(body, user);
     if (!barcode) return json({ ok: false, error: "Description, valid dates, 15 digit code, and model/size combos are required" }, request, 400);
     await saveBarcode(db, barcode);
