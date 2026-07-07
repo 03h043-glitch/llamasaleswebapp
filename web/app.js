@@ -96,10 +96,9 @@ const SKU_DATA = {
     300: "617952"
   }
 };
-const SKU_MODELS = Object.keys(SKU_DATA);
 const APP_BUILD = {
-  version: "v28",
-  baseCommit: "a14ff7d",
+  version: "v29",
+  baseCommit: "a507cf8",
   repo: "03h043-glitch/llamasaleswebapp"
 };
 const DEFAULT_APPEARANCE = { theme: "dark", palette: "default" };
@@ -169,7 +168,7 @@ const state = {
   rateHistory: readJson(KEY.rateHistory, []),
   barcodes: readJson(KEY.barcodes, []),
   session: readJson(KEY.session, null),
-  meta: readJson(KEY.meta, { regions: REGIONS, storesByRegion: {}, models: MODELS, soundbarModels: SOUNDBAR_MODELS, sizes: SIZES, modelCategories: DEFAULT_MODEL_CATEGORIES }),
+  meta: readJson(KEY.meta, { regions: REGIONS, storesByRegion: {}, models: MODELS, soundbarModels: SOUNDBAR_MODELS, sizes: SIZES, modelCategories: DEFAULT_MODEL_CATEGORIES, skus: SKU_DATA }),
   filters: { timeframe: "Today", scope: "Store" },
   salesDay: todayIso(),
   salesSort: "time",
@@ -818,7 +817,7 @@ function renderSkuLookup() {
       <div class="field">
         <label>Model</label>
         <div class="sku-grid models">
-          ${SKU_MODELS.map((item) => `<button class="sku-choice ${model === item ? "active" : ""}" data-action="sku-model" data-value="${esc(item)}">${esc(item)}</button>`).join("")}
+          ${skuModels().map((item) => `<button class="sku-choice ${model === item ? "active" : ""}" data-action="sku-model" data-value="${esc(item)}">${esc(item)}</button>`).join("")}
         </div>
       </div>
       <div class="field">
@@ -841,12 +840,31 @@ function renderSkuLookup() {
 }
 
 function skuSizesForModel(model) {
-  const row = SKU_DATA[model] || {};
-  return Object.keys(row).sort((left, right) => Number(left) - Number(right));
+  const row = skuData()[model] || {};
+  return Object.keys(row).sort(compareSizes);
 }
 
 function selectedSku() {
-  return state.skuModel && state.skuSize ? SKU_DATA[state.skuModel]?.[state.skuSize] || "" : "";
+  return state.skuModel && state.skuSize ? skuData()[state.skuModel]?.[state.skuSize] || "" : "";
+}
+
+function skuData() {
+  return mergeSkuData(SKU_DATA, state.meta.skus);
+}
+
+function skuModels() {
+  return Object.keys(skuData()).sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base", numeric: true }));
+}
+
+function compareSizes(left, right) {
+  const leftNumber = Number(left);
+  const rightNumber = Number(right);
+  const leftIsNumber = Number.isFinite(leftNumber);
+  const rightIsNumber = Number.isFinite(rightNumber);
+  if (leftIsNumber && rightIsNumber) return leftNumber - rightNumber;
+  if (leftIsNumber) return -1;
+  if (rightIsNumber) return 1;
+  return String(left).localeCompare(String(right), undefined, { sensitivity: "base", numeric: true });
 }
 
 function renderBarcodes() {
@@ -1626,6 +1644,9 @@ function applyMetaPayload(meta) {
   if (Array.isArray(meta.sizes)) {
     state.meta.sizes = cleanOptions(meta.sizes, SIZES);
   }
+  if (meta.skus && typeof meta.skus === "object") {
+    state.meta.skus = normalizeSkuData(meta.skus);
+  }
   if (meta.commissionRates && typeof meta.commissionRates === "object") {
     state.rates = meta.commissionRates;
     writeJson(KEY.rates, state.rates);
@@ -1643,6 +1664,31 @@ function applyMetaPayload(meta) {
     state.meta.modelCategories = DEFAULT_MODEL_CATEGORIES;
   }
   writeJson(KEY.meta, state.meta);
+}
+
+function normalizeSkuData(data) {
+  const output = {};
+  for (const [model, sizes] of Object.entries(data || {})) {
+    const cleanModel = String(model || "").trim();
+    if (!cleanModel || !sizes || typeof sizes !== "object") continue;
+    for (const [size, sku] of Object.entries(sizes)) {
+      const cleanSize = String(size || "").trim();
+      const cleanSku = String(sku || "").trim();
+      if (!cleanSize || !cleanSku) continue;
+      if (!output[cleanModel]) output[cleanModel] = {};
+      output[cleanModel][cleanSize] = cleanSku;
+    }
+  }
+  return output;
+}
+
+function mergeSkuData(fallback, remote) {
+  const output = normalizeSkuData(fallback);
+  const normalizedRemote = normalizeSkuData(remote);
+  for (const [model, sizes] of Object.entries(normalizedRemote)) {
+    output[model] = { ...(output[model] || {}), ...sizes };
+  }
+  return output;
 }
 
 function normalizeBarcode(raw) {

@@ -58,6 +58,14 @@ CREATE TABLE IF NOT EXISTS barcodes (
   created_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS product_skus (
+  model TEXT NOT NULL,
+  size TEXT NOT NULL,
+  sku TEXT NOT NULL DEFAULT '',
+  updated_at INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (model, size)
+);
+
 CREATE INDEX IF NOT EXISTS idx_sales_username_date ON sales (username, date);
 CREATE INDEX IF NOT EXISTS idx_sales_region_store_date ON sales (region, store, date);
 CREATE INDEX IF NOT EXISTS idx_sales_date ON sales (date);

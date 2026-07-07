@@ -25,6 +25,17 @@ const DEFAULT_MODEL_CATEGORIES = {
   C2: "LASER",
   "C2 Ultra": "LASER"
 };
+const DEFAULT_SKUS = {
+  A6Q: { 43: "643644", 50: "676172", 55: "693866", 65: "739467", 75: "694145", 85: "568128", 100: "695150" },
+  E7Q: { 43: "643519", 50: "749522", 55: "693686", 65: "739304", 75: "519328", 85: "526657", 100: "^ 58\"" },
+  "E7Q Pro": { 43: "630177", 50: "594655", 55: "680825", 65: "725644", 75: "631417", 85: "628973", 100: "577046" },
+  U7Q: { 50: "665262", 55: "667972", 65: "715928", 75: "856306", 85: "677759", 100: "793145" },
+  "U7Q Pro": { 55: "666670", 65: "715214", 75: "855179", 85: "859981", 100: "517009" },
+  U8Q: { 55: "665955", 65: "702459", 75: "850340", 85: "579848", 100: "855845" },
+  PX3: { 150: "603437" },
+  C2: { 300: "626823" },
+  "C2 Ultra": { 300: "617952" }
+};
 const DEFAULT_RESET_PASSWORD = "C2ULTRA";
 const ADMIN_COOKIE = "llamasales_admin";
 const ALLOWED_ORIGINS = new Set([
@@ -242,6 +253,10 @@ async function handleAdmin(request, env, url) {
     }
     return redirect("/admin");
   }
+  if (request.method === "POST" && url.pathname === "/admin/skus/batch-save") {
+    await adminBatchSaveSkus(request, db);
+    return redirect("/admin#sku-matrix");
+  }
   if (request.method === "GET" && url.pathname === "/backup") {
     const backup = await buildBackup(db);
     return new Response(JSON.stringify(backup, null, 2), {
@@ -320,6 +335,24 @@ async function adminBatchSaveRates(request, db, datedOnly) {
   return itemType;
 }
 
+async function adminBatchSaveSkus(request, db) {
+  const form = await request.formData();
+  const combos = form.getAll("combo");
+  const values = form.getAll("sku");
+  for (let index = 0; index < combos.length; index += 1) {
+    const combo = parseCombo(combos[index]);
+    const model = clean(combo?.model);
+    const size = clean(combo?.size);
+    const sku = clean(values[index]);
+    if (!model || !size) continue;
+    if (!sku) {
+      await db.prepare("DELETE FROM product_skus WHERE model=? AND size=?").bind(model, size).run();
+    } else {
+      await saveSku(db, model, size, sku);
+    }
+  }
+}
+
 async function saveModelCategoriesFromForm(db, form) {
   const models = form.getAll("modelCategoryModel");
   const categories = form.getAll("modelCategory");
@@ -344,6 +377,9 @@ async function adminHome(db) {
   const soundbarModels = await modelList(db, "soundbar");
   const sizes = await sizeList(db);
   const rates = await ratesMap(db);
+  const skus = await skuMap(db);
+  const skuModels = skuModelList(tvModels);
+  const skuSizes = skuSizeList(sizes);
   const modelCategories = await modelCategoryMap(db);
   const totals = await db.prepare("SELECT COUNT(*) totalUnits, SUM(CASE WHEN brand='Hisense' AND item_type='tv' THEN 1 ELSE 0 END) hisenseUnits, SUM(price) totalRevenue, SUM(CASE WHEN brand='Hisense' AND item_type='tv' THEN price ELSE 0 END) hisenseRevenue FROM sales").first();
   const totalRevenue = Number(totals?.totalRevenue || 0);
@@ -371,6 +407,7 @@ async function adminHome(db) {
         ${sales.map((sale) => `<tr><td>${escapeHtml(sale.date)}</td><td>${escapeHtml(sale.username)}</td><td>${escapeHtml(sale.region)}</td><td>${escapeHtml(sale.store)}</td><td>${escapeHtml(sale.brand)}</td><td>${escapeHtml(sale.item_type)}</td><td>${escapeHtml(sale.model)}</td><td>${escapeHtml(sale.size)}</td><td>${money(sale.price)}</td></tr>`).join("")}
       </table>
     </section>
+    ${skuSection(skuModels, skuSizes, skus)}
   `);
 }
 
@@ -464,6 +501,26 @@ function rateInputCell(itemType, model, size, rates, blank = false) {
   const key = rateKey(itemType, model, size);
   const value = blank ? "" : rates[key] ?? "";
   return `<td><input type="hidden" name="combo" value="${attr(JSON.stringify({ itemType, model, size }))}"><input class="matrixInput" name="value" type="number" step="0.01" value="${attr(value)}" placeholder="-"></td>`;
+}
+
+function skuSection(models, sizes, skus) {
+  return `
+    <section class="card" id="sku-matrix">
+      <h2>SKU Lookup Matrix</h2>
+      <p class="muted">Low-frequency reference table. Models run down rows and sizes run across columns. Edit any number of cells, then save once.</p>
+      <form method="post" action="/admin/skus/batch-save" class="stackForm">
+        <div class="actions matrixActions"><button>Save SKU Matrix</button></div>
+        <div class="matrixWrap"><table class="matrix skuMatrix"><thead><tr><th>Model</th>${sizes.map((size) => `<th>${escapeHtml(size)}"</th>`).join("")}</tr></thead><tbody>
+          ${models.map((model) => `<tr><th scope="row">${escapeHtml(model)}</th>${sizes.map((size) => skuInputCell(model, size, skus)).join("")}</tr>`).join("")}
+        </tbody></table></div>
+      </form>
+    </section>
+  `;
+}
+
+function skuInputCell(model, size, skus) {
+  const value = skus[skuKey(model, size)] || "";
+  return `<td><input type="hidden" name="combo" value="${attr(JSON.stringify({ model, size }))}"><input class="matrixInput skuInput" name="sku" value="${attr(value)}" placeholder="-"></td>`;
 }
 
 function modelDeleteList(itemType, models) {
@@ -565,6 +622,7 @@ async function publicMeta(db) {
     soundbarModels: await modelList(db, "soundbar"),
     sizes: await sizeList(db),
     modelCategories: await modelCategoryMap(db),
+    skus: await skuClientMap(db),
     commissionRates: await ratesClientMap(db),
     commissionRateHistory: await rateHistoryClientList(db),
     barcodes: await activeBarcodes(db)
@@ -585,6 +643,7 @@ async function ensureDefaults(db) {
     for (const [index, size] of SIZES.entries()) await db.prepare("INSERT OR IGNORE INTO product_sizes (size,sort_order) VALUES (?,?)").bind(size, (index + 1) * 10).run();
   }
   await applyDefaultModelCategories(db);
+  await seedDefaultSkus(db);
 }
 
 async function ensureSchema(db) {
@@ -597,6 +656,7 @@ async function ensureSchema(db) {
   }
   await db.prepare("CREATE TABLE IF NOT EXISTS commission_rate_history (item_type TEXT NOT NULL, model TEXT NOT NULL, size TEXT NOT NULL DEFAULT '', effective_from TEXT NOT NULL, value REAL NOT NULL DEFAULT 0, cleared INTEGER NOT NULL DEFAULT 0, source TEXT NOT NULL DEFAULT 'current', created_at INTEGER NOT NULL, PRIMARY KEY (item_type, model, size, effective_from))").run();
   await db.prepare("CREATE TABLE IF NOT EXISTS barcodes (id TEXT PRIMARY KEY, description TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT NOT NULL, code TEXT NOT NULL, applies_to TEXT NOT NULL DEFAULT '[]', created_by TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL)").run();
+  await db.prepare("CREATE TABLE IF NOT EXISTS product_skus (model TEXT NOT NULL, size TEXT NOT NULL, sku TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (model, size))").run();
   const historyColumns = await all(db, "PRAGMA table_info(commission_rate_history)");
   if (!historyColumns.some((column) => column.name === "source")) {
     await db.prepare("ALTER TABLE commission_rate_history ADD COLUMN source TEXT NOT NULL DEFAULT 'current'").run();
@@ -820,6 +880,72 @@ async function saveSize(db, size) {
   await db.prepare("INSERT OR IGNORE INTO product_sizes (size,sort_order) VALUES (?,?)").bind(size, Number(max?.maxSort || 0) + 10).run();
 }
 
+async function saveSku(db, model, size, sku) {
+  if (!model || !size) return;
+  await db.prepare("INSERT INTO product_skus (model,size,sku,updated_at) VALUES (?,?,?,?) ON CONFLICT(model,size) DO UPDATE SET sku=excluded.sku, updated_at=excluded.updated_at")
+    .bind(model, size, sku, Date.now()).run();
+}
+
+async function seedDefaultSkus(db) {
+  const countRow = await db.prepare("SELECT COUNT(*) value FROM product_skus").first();
+  if (Number(countRow?.value || 0) > 0) return;
+  for (const [model, sizes] of Object.entries(DEFAULT_SKUS)) {
+    for (const [size, sku] of Object.entries(sizes)) {
+      await saveSku(db, model, size, sku);
+    }
+  }
+}
+
+async function skuMap(db) {
+  const rows = await all(db, "SELECT model, size, sku FROM product_skus ORDER BY model, size");
+  const map = {};
+  for (const row of rows) {
+    const model = clean(row.model);
+    const size = clean(row.size);
+    const sku = clean(row.sku);
+    if (model && size && sku) map[skuKey(model, size)] = sku;
+  }
+  return map;
+}
+
+async function skuClientMap(db) {
+  const rows = await all(db, "SELECT model, size, sku FROM product_skus ORDER BY model, size");
+  const map = {};
+  for (const row of rows) {
+    const model = clean(row.model);
+    const size = clean(row.size);
+    const sku = clean(row.sku);
+    if (!model || !size || !sku) continue;
+    if (!map[model]) map[model] = {};
+    map[model][size] = sku;
+  }
+  return map;
+}
+
+function skuKey(model, size) {
+  return `${clean(model).toLowerCase()}|${clean(size).toLowerCase()}`;
+}
+
+function skuModelList(models) {
+  return uniqueCleanList([...Object.keys(DEFAULT_SKUS), ...models]);
+}
+
+function skuSizeList(sizes) {
+  const defaultSizes = Object.values(DEFAULT_SKUS).flatMap((row) => Object.keys(row));
+  return uniqueCleanList([...sizes, ...defaultSizes]).sort(compareSizes);
+}
+
+function compareSizes(left, right) {
+  const leftNumber = Number(left);
+  const rightNumber = Number(right);
+  const leftIsNumber = Number.isFinite(leftNumber);
+  const rightIsNumber = Number.isFinite(rightNumber);
+  if (leftIsNumber && rightIsNumber) return leftNumber - rightNumber;
+  if (leftIsNumber) return -1;
+  if (rightIsNumber) return 1;
+  return String(left).localeCompare(String(right), undefined, { sensitivity: "base", numeric: true });
+}
+
 async function buildBackup(db) {
   return {
     settings: await all(db, "SELECT * FROM settings"),
@@ -829,6 +955,7 @@ async function buildBackup(db) {
     commissionRateHistory: await all(db, "SELECT * FROM commission_rate_history"),
     productModels: await all(db, "SELECT * FROM product_models"),
     productSizes: await all(db, "SELECT * FROM product_sizes"),
+    productSkus: await all(db, "SELECT * FROM product_skus"),
     barcodes: await all(db, "SELECT * FROM barcodes")
   };
 }
