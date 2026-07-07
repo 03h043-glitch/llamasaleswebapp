@@ -186,7 +186,7 @@ button {
 .content::after {
   content: "";
   display: block;
-  height: calc(178px + env(safe-area-inset-bottom));
+  height: calc(188px + env(safe-area-inset-bottom));
 }
 
 .auth-shell {
@@ -664,16 +664,16 @@ select:disabled {
   left: 50%;
   bottom: calc(18px + env(safe-area-inset-bottom));
   z-index: 19;
-  width: min(156px, calc(100vw - 210px));
-  min-width: 132px;
-  height: 28px;
+  width: min(208px, calc(100vw - 176px));
+  min-width: 176px;
+  height: 38px;
   transform: translateX(-50%);
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   justify-items: center;
   align-items: center;
-  gap: 8px;
-  padding: 3px 8px;
+  gap: 12px;
+  padding: 4px 10px;
   border: 1px solid var(--stroke);
   border-radius: 999px;
   background: var(--panel);
@@ -681,14 +681,19 @@ select:disabled {
 }
 
 .utility-nav .icon-btn {
-  width: 22px;
-  height: 22px;
+  width: 30px;
+  height: 30px;
   border-radius: 999px;
+  padding: 0;
+  place-self: center;
+  place-items: center;
+  line-height: 0;
 }
 
 .utility-nav .icon-btn svg {
-  width: 14px;
-  height: 14px;
+  display: block;
+  width: 18px;
+  height: 18px;
 }
 
 .drawer {

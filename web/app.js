@@ -62,8 +62,8 @@ const BRAND_COLORS = {
   Other: "#cbd5e1"
 };
 const APP_BUILD = {
-  version: "v22",
-  baseCommit: "69c7135",
+  version: "v23",
+  baseCommit: "eebf29d",
   repo: "03h043-glitch/llamasaleswebapp"
 };
 const DEFAULT_APPEARANCE = { theme: "dark", palette: "default" };
