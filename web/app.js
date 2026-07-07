@@ -29,12 +29,30 @@ const PREMIUM = [
   { label: "RGB", color: "var(--blood)" },
   { label: "LASER", color: "var(--laser)" }
 ];
+const PRODUCT_TYPES = PREMIUM.map((item) => item.label);
+const DEFAULT_MODEL_CATEGORIES = {
+  A4Q: "UHD",
+  A5Q: "UHD",
+  A6Q: "UHD",
+  A7Q: "QLED",
+  E7Q: "QLED",
+  "E7Q Pro": "QLED",
+  U7Q: "MINI LED",
+  "U7Q Pro": "MINI LED",
+  U8Q: "MINI LED",
+  U7S: "MINI LED",
+  "U7S Pro": "MINI LED",
+  UR8S: "RGB",
+  UR9S: "RGB",
+  C2: "LASER",
+  "C2 Ultra": "LASER"
+};
 const DEFAULT_COMMISSION = [5, 8, 15, 25, 35];
 const OTHER_HISENSE_COMMISSION = 5;
 const PRODUCTION_DOMAIN = "tiredllama.co.uk";
 const PRODUCTION_API_URL = "https://api.tiredllama.co.uk";
 const ADD_NEW_STORE = "__add_new_store__";
-const DASHBOARD_ACCENT = "var(--hisense)";
+const DASHBOARD_ACCENT = "var(--blue)";
 const BRAND_COLORS = {
   Hisense: "#00aaa6",
   TCL: "#ed1c24",
@@ -71,7 +89,7 @@ const state = {
   rates: readJson(KEY.rates, {}),
   rateHistory: readJson(KEY.rateHistory, []),
   session: readJson(KEY.session, null),
-  meta: readJson(KEY.meta, { regions: REGIONS, storesByRegion: {}, models: MODELS, soundbarModels: SOUNDBAR_MODELS, sizes: SIZES }),
+  meta: readJson(KEY.meta, { regions: REGIONS, storesByRegion: {}, models: MODELS, soundbarModels: SOUNDBAR_MODELS, sizes: SIZES, modelCategories: DEFAULT_MODEL_CATEGORIES }),
   filters: { timeframe: "Today", scope: "Store" },
   salesDay: todayIso(),
   salesSort: "time",
@@ -110,6 +128,7 @@ app.addEventListener("click", async (event) => {
     state.page = value;
     state.menuOpen = false;
     render();
+    if (value === "commission") await syncNow(false);
   } else if (action === "dashboard") {
     goDashboard();
   } else if (action === "sign-out") {
@@ -311,8 +330,8 @@ function renderShell(account) {
       <header class="topbar">
         <button class="icon-btn menu-disabled" data-action="menu" aria-label="Menu disabled" disabled>${icon("menu")}</button>
         <div class="brand-title">
-          <strong>LlamaSales</strong>
-          <span>${esc(subtitle(account))}</span>
+          <strong>${esc(account.store || "LlamaSales")}</strong>
+          <span>${esc(account.region || "")}</span>
         </div>
         <div class="status-pill">
           <span class="dot"></span>
@@ -423,7 +442,7 @@ function renderDashboard(account) {
 
     <div class="dashboard-card-crop">
       <div class="grid">
-        ${kpi("Hisense Share of Value", `${stats.shareOfValue}%`, `${money(stats.hisenseRevenue)} of ${money(stats.totalRevenue)} total value`, sovColor, "span-4 large sov-card", brandShareBar(stats))}
+        ${kpi("Hisense Share of Value", `${stats.shareOfValue}%`, "", sovColor, "span-4 large sov-card", brandShareBar(stats))}
         ${kpi("Hisense Units", stats.hisenseUnits, `of ${stats.totalUnits} total units across brands`, DASHBOARD_ACCENT, "span-2")}
         ${kpi("Hisense Revenue", money(stats.hisenseRevenue), `vs ${money(stats.totalRevenue)} across all brands`, DASHBOARD_ACCENT, "span-2")}
         ${kpi("Hisense ASP", money(stats.hisenseAsp), "average selling price", DASHBOARD_ACCENT, "span-2")}
@@ -550,6 +569,7 @@ function saleEditRow(sale) {
 function saleEditForm(sale) {
   const isHisense = sale.brand === "Hisense";
   const isSoundbar = saleItemType(sale) === "soundbar";
+  const modelValues = isSoundbar ? soundbarModelOptions() : modelOptions();
   return `
     <form class="sale-edit" data-form="sale-edit">
       <input type="hidden" name="id" value="${esc(sale.id)}">
@@ -559,10 +579,10 @@ function saleEditForm(sale) {
       </div>
       <div class="sale-edit-grid">
         <div class="field"><label>Date</label><input name="date" type="date" value="${esc(sale.date)}" required></div>
-        <div class="field"><label>Brand</label><select name="brand">${options(BRANDS, sale.brand)}</select></div>
-        <div class="field"><label>Type</label><select name="itemType"><option value="tv" ${!isSoundbar ? "selected" : ""}>TV</option><option value="soundbar" ${isSoundbar ? "selected" : ""}>Soundbar</option></select></div>
-        <div class="field"><label>Model</label><input name="model" value="${esc(isHisense ? sale.model : "")}" placeholder="Hisense only"></div>
-        <div class="field"><label>Size</label><input name="size" value="${esc(isHisense && !isSoundbar ? sale.size : "")}" placeholder="TV only"></div>
+        <div class="field"><label>Brand</label><select name="brand" data-sale-brand>${options(BRANDS, sale.brand)}</select></div>
+        <div class="field" data-hisense-sale-field ${isHisense ? "" : "hidden"}><label>Type</label><select name="itemType" data-sale-type><option value="tv" ${!isSoundbar ? "selected" : ""}>TV</option><option value="soundbar" ${isSoundbar ? "selected" : ""}>Soundbar</option></select></div>
+        <div class="field" data-hisense-sale-field ${isHisense ? "" : "hidden"}><label>Model</label><select name="model" data-sale-model>${options(modelValues, isHisense ? sale.model : "")}</select></div>
+        <div class="field" data-hisense-sale-field data-tv-only ${isHisense && !isSoundbar ? "" : "hidden"}><label>Size</label><select name="size">${options(sizeOptions(), isHisense && !isSoundbar ? sale.size : "")}</select></div>
         <div class="field"><label>Value</label><input name="price" inputmode="decimal" value="${esc(sale.price)}" required></div>
       </div>
       <div class="row-actions">
@@ -602,17 +622,8 @@ function renderCommission(account) {
       <div class="seg-row four">${COMMISSION_VIEWS.map((view) => buttonSeg("commission-view", view, view, state.commissionView === view)).join("")}</div>
     </div>
     ${state.commissionView === "Pay Day" ? renderPayPeriodPicker() : ""}
-    <div class="grid">
-      ${kpi(state.commissionView, money(bucket.earnings), `${bucket.units} paid Hisense items`, "var(--gold)", "span-4")}
-      ${kpi("Period", `${shortDate(bucket.start)} - ${shortDate(bucket.end)}`, state.commissionView === "Pay Day" ? payPeriodSubtitle(bucket.period) : "commission date range", "var(--hisense)", "span-4")}
-    </div>
-    <section class="card">
-      <h3>Commission Rates</h3>
-      <div class="metric-row">
-        ${PREMIUM.map((cat, index) => metric(cat.label, money(DEFAULT_COMMISSION[index]), "category default", cat.color)).join("")}
-        ${metric("OTHER", money(OTHER_HISENSE_COMMISSION), "fallback", "var(--muted)")}
-      </div>
-    </section>
+    ${commissionHero(bucket)}
+    ${commissionMix(bucket)}
     <section class="card">
       <h3>Paid Sales</h3>
       ${bucket.entries.length ? bucket.entries.slice(0, 20).map((entry) => listRow(saleName(entry.sale), `${entry.sale.date} | ${money(entry.sale.price)}`, money(entry.value))).join("") : `<p class="muted">No paid Hisense sales in this view.</p>`}
@@ -642,6 +653,52 @@ function commissionViewKey(view) {
 function payPeriodSubtitle(period) {
   if (!period) return "pay calendar";
   return `${period.payDate ? `paid ${shortDate(parseIsoDate(period.payDate))}` : "pay day TBC"} | weeks ${period.weeks.join(", ")}`;
+}
+
+function commissionHero(bucket) {
+  return `
+    <section class="card kpi commission-hero" style="--accent:var(--blue)">
+      <div>
+        <div class="kpi-title">${esc(state.commissionView)}</div>
+        <div class="kpi-value">${esc(money(bucket.earnings))}</div>
+        <div class="kpi-sub">${esc(bucket.units)} paid Hisense item${bucket.units === 1 ? "" : "s"}</div>
+      </div>
+      <div class="commission-period">
+        <strong>${esc(shortDate(bucket.start))} - ${esc(shortDate(bucket.end))}</strong>
+        <span>${esc(state.commissionView === "Pay Day" ? payPeriodSubtitle(bucket.period) : "commission date range")}</span>
+      </div>
+    </section>
+  `;
+}
+
+function commissionMix(bucket) {
+  const total = Number(bucket.earnings || 0);
+  const segments = commissionMixSegments(bucket);
+  return `
+    <section class="card commission-mix">
+      <h3>Commission Mix <span class="muted">earnings by type</span></h3>
+      <div class="premium-bar">
+        ${total <= 0 ? `<div class="premium-seg" style="width:100%;background:rgba(92,108,130,.45)"></div>` : segments.filter((item) => item.value > 0).map((item) => `<div class="premium-seg" style="width:${item.pct}%;background:${item.color}"></div>`).join("")}
+      </div>
+      <div class="legend">
+        ${segments.map((item) => `<span><i class="swatch" style="background:${item.color}"></i>${esc(item.label)} ${item.pct}% ${money(item.value)}</span>`).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function commissionMixSegments(bucket) {
+  const total = Number(bucket.earnings || 0);
+  const categories = [
+    ...PREMIUM,
+    { label: "SOUNDBAR", color: "var(--blue)" },
+    { label: "OTHER", color: "var(--subtle)" }
+  ];
+  return categories.map((item) => {
+    const value = Number(bucket.mix?.[item.label] || 0);
+    const pct = total <= 0 ? 0 : Math.round((value * 100) / total);
+    return { ...item, value, pct };
+  });
 }
 
 function renderAsm(account) {
@@ -838,6 +895,14 @@ async function saveSaleEdit(data) {
   const price = Number(data.price || 0);
   if (!brand || !price) {
     toast("Choose a brand and enter a valid value.");
+    return;
+  }
+  if (brand === "Hisense" && !String(data.model || "").trim()) {
+    toast("Choose a Hisense model.");
+    return;
+  }
+  if (brand === "Hisense" && itemType === "tv" && !String(data.size || "").trim()) {
+    toast("Choose a TV size.");
     return;
   }
   const updated = {
@@ -1094,6 +1159,11 @@ function applyMetaPayload(meta) {
   if (Array.isArray(meta.sizes)) {
     state.meta.sizes = cleanOptions(meta.sizes, SIZES);
   }
+  if (meta.modelCategories && typeof meta.modelCategories === "object") {
+    state.meta.modelCategories = normalizeModelCategories(meta.modelCategories);
+  } else if (!state.meta.modelCategories || typeof state.meta.modelCategories !== "object") {
+    state.meta.modelCategories = DEFAULT_MODEL_CATEGORIES;
+  }
   writeJson(KEY.meta, state.meta);
 }
 
@@ -1120,6 +1190,16 @@ function cleanOptions(values, fallback) {
 
 function sortedOptions(values) {
   return [...values].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base", numeric: true }));
+}
+
+function normalizeModelCategories(categories) {
+  const output = { ...DEFAULT_MODEL_CATEGORIES };
+  for (const [model, category] of Object.entries(categories || {})) {
+    const cleanModel = String(model || "").trim();
+    const cleanCategory = String(category || "").trim().toUpperCase();
+    if (cleanModel && PRODUCT_TYPES.includes(cleanCategory)) output[cleanModel] = cleanCategory;
+  }
+  return output;
 }
 
 function dashboardStats(account, timeframe, scope) {
@@ -1191,14 +1271,17 @@ function commissionStats(account) {
 }
 
 function blankCommissionBucket(start, end, period = null) {
-  return { units: 0, earnings: 0, start, end, period, entries: [] };
+  return { units: 0, earnings: 0, start, end, period, entries: [], mix: {} };
 }
 
 function addCommissionEntry(bucket, saleDate, sale, value) {
   if (saleDate < bucket.start || saleDate > bucket.end) return;
+  const cleanValue = Number(value || 0);
+  const type = commissionMixType(sale);
   bucket.units += 1;
-  bucket.earnings += value;
-  bucket.entries.push({ sale, value });
+  bucket.earnings += cleanValue;
+  bucket.mix[type] = Number(bucket.mix[type] || 0) + cleanValue;
+  bucket.entries.push({ sale, value: cleanValue });
 }
 
 function regionStats() {
@@ -1263,12 +1346,18 @@ function inTimeframe(sale, timeframe) {
 }
 
 function premiumIndex(model) {
-  if (["A4Q", "A5Q", "A6Q"].includes(model)) return 0;
-  if (["A7Q", "E7Q", "E7Q Pro"].includes(model)) return 1;
-  if (["U7Q", "U7Q Pro", "U8Q", "U7S", "U7S Pro"].includes(model)) return 2;
-  if (["UR8S", "UR9S"].includes(model)) return 3;
-  if (["C2", "C2 Ultra"].includes(model)) return 4;
-  return -1;
+  return PREMIUM.findIndex((item) => item.label === modelCategory(model));
+}
+
+function modelCategory(model) {
+  const cleanModel = String(model || "").trim();
+  const category = String(state.meta.modelCategories?.[cleanModel] || DEFAULT_MODEL_CATEGORIES[cleanModel] || "").trim().toUpperCase();
+  return PRODUCT_TYPES.includes(category) ? category : "";
+}
+
+function commissionMixType(sale) {
+  if (saleItemType(sale) === "soundbar") return "SOUNDBAR";
+  return modelCategory(sale.model) || "OTHER";
 }
 
 function commissionValue(sale) {
@@ -1454,9 +1543,9 @@ function drawDashboardShareImage(ctx, layout, stats) {
   drawShareCard(ctx, 0, y, layout.width, layout.sovHeight, sovColor);
   drawShareText(ctx, "Hisense Share of Value", 14, y + 28, 12, "#9dabc0", 800);
   drawShareText(ctx, `${stats.shareOfValue}%`, 14, y + 78, 46, sovColor, 900);
-  drawShareText(ctx, `${money(stats.hisenseRevenue)} of ${money(stats.totalRevenue)} total value`, 14, y + 104, 12, "#9dabc0", 500);
   const gaugeWidth = Math.min(layout.width - 38, 320);
   drawShareGauge(ctx, stats, layout.width / 2, y + layout.sovHeight - 32, gaugeWidth, sovColor);
+  drawShareCenteredText(ctx, `${money(stats.hisenseRevenue)} / ${money(stats.totalRevenue)}`, layout.width / 2, y + 146, 13, "#9dabc0", 800);
 
   y += layout.sovHeight + layout.gap;
   drawShareKpi(ctx, 0, y, layout.half, layout.smallHeight, "Hisense Units", String(stats.hisenseUnits), `of ${stats.totalUnits} total units across brands`, "#00aaa6");
@@ -1612,6 +1701,13 @@ function drawShareText(ctx, text, x, y, size, color, weight = 500, maxWidth = 0)
   ctx.restore();
 }
 
+function drawShareCenteredText(ctx, text, x, y, size, color, weight = 500, maxWidth = 0) {
+  ctx.save();
+  ctx.textAlign = "center";
+  drawShareText(ctx, text, x, y, size, color, weight, maxWidth);
+  ctx.restore();
+}
+
 function fitCanvasText(ctx, text, maxWidth) {
   if (ctx.measureText(text).width <= maxWidth) return text;
   let output = text;
@@ -1753,6 +1849,7 @@ function brandShareBar(stats) {
           <text class="brand-share-end-label" x="28" y="138">0%</text>
           <text class="brand-share-end-label" x="212" y="138">100%</text>
         </svg>
+        <div class="brand-share-value">${money(stats.hisenseRevenue)} / ${money(stats.totalRevenue)}</div>
       </div>
       <div class="brand-share-legend">
         ${legendSegments.map((item) => `<span><i class="swatch" style="background:${item.color}"></i>${esc(item.brand)} ${shareLabel(item.pct)}</span>`).join("")}
@@ -1850,11 +1947,12 @@ function regionCard(region) {
 }
 
 function kpi(title, value, subtitleText, accent, extraClass = "", extra = "") {
+  const subtitle = subtitleText ? `<div class="kpi-sub">${esc(subtitleText)}</div>` : "";
   return `
     <section class="card kpi ${extraClass}" style="--accent:${accent}">
       <div class="kpi-title">${esc(title)}</div>
       <div class="kpi-value">${esc(String(value))}</div>
-      <div class="kpi-sub">${esc(subtitleText)}</div>
+      ${subtitle}
       ${extra}
     </section>
   `;

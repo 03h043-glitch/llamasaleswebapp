@@ -82,8 +82,8 @@ button {
 }
 
 .icon-btn.active {
-  border-color: var(--hisense);
-  background: rgba(0, 170, 166, 0.18);
+  border-color: var(--blue);
+  background: rgba(80, 150, 255, 0.18);
 }
 
 .icon-btn:disabled,
@@ -290,6 +290,7 @@ h3 {
 .brand-share-gauge {
   width: min(100%, 360px);
   margin: 0 auto;
+  position: relative;
 }
 
 .brand-share-gauge svg {
@@ -297,6 +298,17 @@ h3 {
   width: 100%;
   height: auto;
   overflow: visible;
+}
+
+.brand-share-value {
+  position: absolute;
+  left: 50%;
+  top: 62%;
+  transform: translate(-50%, -50%);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
 }
 
 .brand-share-track,
@@ -578,7 +590,7 @@ select:disabled {
   width: 52px;
   height: 52px;
   border-radius: 26px;
-  background: var(--hisense);
+  background: var(--blue);
 }
 
 .drawer {
@@ -631,8 +643,46 @@ select:disabled {
 }
 
 .commission-float strong {
-  color: var(--hisense);
+  color: var(--blue);
   font-size: 18px;
+}
+
+.commission-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+}
+
+.commission-hero .kpi-value {
+  color: var(--blue);
+}
+
+.commission-period {
+  max-width: 170px;
+  text-align: right;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.commission-period strong,
+.commission-period span {
+  display: block;
+}
+
+.commission-period strong {
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.commission-mix {
+  border-color: color-mix(in srgb, var(--blue), white 10%);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--blue), transparent 86%), var(--card));
+}
+
+.commission-mix .legend {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .float-close {

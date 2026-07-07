@@ -7,6 +7,25 @@ const REGIONS = [
 const TV_MODELS = ["A4Q", "A5Q", "A6Q", "A7Q", "E7Q", "E7Q Pro", "U7Q", "U7Q Pro", "U8Q", "U7S", "U7S Pro", "UR8S", "UR9S", "C2", "C2 Ultra", "Other"];
 const SOUNDBAR_MODELS = ["AX3100Q", "AX5100Q", "AX5125H", "AX5125Q", "AX7100Q", "AX8100Q", "Other"];
 const SIZES = ["32", "40", "43", "50", "55", "65", "75", "85", "100", "Other"];
+const PRODUCT_TYPES = ["UHD", "QLED", "MINI LED", "RGB", "LASER"];
+const DEFAULT_MODEL_CATEGORIES = {
+  A4Q: "UHD",
+  A5Q: "UHD",
+  A6Q: "UHD",
+  A7Q: "QLED",
+  E7Q: "QLED",
+  "E7Q Pro": "QLED",
+  U7Q: "MINI LED",
+  "U7Q Pro": "MINI LED",
+  U8Q: "MINI LED",
+  U7S: "MINI LED",
+  "U7S Pro": "MINI LED",
+  UR8S: "RGB",
+  UR9S: "RGB",
+  C2: "LASER",
+  "C2 Ultra": "LASER"
+};
+const DEFAULT_RESET_PASSWORD = "C2ULTRA";
 const ADMIN_COOKIE = "llamasales_admin";
 const ALLOWED_ORIGINS = new Set([
   "https://app.tiredllama.co.uk",
@@ -154,6 +173,10 @@ async function handleAdmin(request, env, url) {
     await adminSaveUser(request, db);
     return redirect("/admin");
   }
+  if (request.method === "POST" && url.pathname === "/admin/users/reset-password") {
+    await adminResetUserPassword(request, db);
+    return redirect("/admin");
+  }
   if (request.method === "POST" && url.pathname === "/admin/users/delete") {
     const form = await request.formData();
     await db.prepare("DELETE FROM users WHERE username=?").bind(clean(form.get("username"))).run();
@@ -229,6 +252,13 @@ async function adminSaveUser(request, db) {
     .bind(username, passwordHash, email, region, store, existing?.created_at || Date.now()).run();
 }
 
+async function adminResetUserPassword(request, db) {
+  const form = await request.formData();
+  const username = clean(form.get("username"));
+  if (!username) return;
+  await db.prepare("UPDATE users SET password_hash=? WHERE username=?").bind(await sha256(DEFAULT_RESET_PASSWORD), username).run();
+}
+
 async function adminBatchSaveRates(request, db, datedOnly) {
   const form = await request.formData();
   const itemType = clean(form.get("itemType")) === "soundbar" ? "soundbar" : "tv";
@@ -236,6 +266,10 @@ async function adminBatchSaveRates(request, db, datedOnly) {
   const combos = form.getAll("combo");
   const values = form.getAll("value");
   const currentRates = datedOnly ? {} : await ratesMap(db);
+
+  if (!datedOnly && itemType === "tv") {
+    await saveModelCategoriesFromForm(db, form);
+  }
 
   for (let index = 0; index < combos.length; index += 1) {
     const combo = parseCombo(combos[index]);
@@ -268,6 +302,14 @@ async function adminBatchSaveRates(request, db, datedOnly) {
   return itemType;
 }
 
+async function saveModelCategoriesFromForm(db, form) {
+  const models = form.getAll("modelCategoryModel");
+  const categories = form.getAll("modelCategory");
+  for (let index = 0; index < models.length; index += 1) {
+    await saveModelCategory(db, clean(models[index]), clean(categories[index]));
+  }
+}
+
 function parseCombo(value) {
   try {
     const parsed = JSON.parse(String(value || ""));
@@ -284,6 +326,7 @@ async function adminHome(db) {
   const soundbarModels = await modelList(db, "soundbar");
   const sizes = await sizeList(db);
   const rates = await ratesMap(db);
+  const modelCategories = await modelCategoryMap(db);
   const totals = await db.prepare("SELECT COUNT(*) totalUnits, SUM(CASE WHEN brand='Hisense' AND item_type='tv' THEN 1 ELSE 0 END) hisenseUnits, SUM(price) totalRevenue, SUM(CASE WHEN brand='Hisense' AND item_type='tv' THEN price ELSE 0 END) hisenseRevenue FROM sales").first();
   const totalRevenue = Number(totals?.totalRevenue || 0);
   const hisenseRevenue = Number(totals?.hisenseRevenue || 0);
@@ -301,30 +344,8 @@ async function adminHome(db) {
       ${kpi("Hisense SOV", `${share}%`, "share of TV value")}
       ${kpi("Sales Value", money(totalRevenue), "all brands")}
     </div>
-    <section class="card">
-      <h2>Manage Users</h2>
-      <form method="post" action="/admin/users/save" class="row">
-        <div><label>Username</label><input name="username" required></div>
-        <div><label>Email</label><input name="email" type="email" required></div>
-        <div><label>Region</label><select name="region" required><option value="">Choose region</option>${options(REGIONS, "")}</select></div>
-        <div><label>Store</label><input name="store" required></div>
-        <div><label>Password</label><input name="password" type="password" placeholder="required for new"><button>Create User</button></div>
-      </form>
-      ${users.map((user) => `
-        <div class="userEdit">
-          <form method="post" action="/admin/users/save" class="userEditForm">
-            <div><label>Username</label><input name="username" value="${attr(user.username)}" readonly></div>
-            <div><label>Email</label><input name="email" type="email" value="${attr(user.email)}" required></div>
-            <div><label>Region</label><select name="region" required>${options(REGIONS, user.region)}</select></div>
-            <div><label>Store</label><input name="store" value="${attr(user.store)}" required></div>
-            <div><label>Password</label><input name="password" type="password" placeholder="blank keeps existing"></div>
-            <button>Save</button>
-          </form>
-          <form method="post" action="/admin/users/delete"><input type="hidden" name="username" value="${attr(user.username)}"><button class="danger">Delete</button></form>
-        </div>
-      `).join("")}
-    </section>
-    ${matrixSection("TV Commission Matrix", "tv", tvModels, sizes, rates)}
+    ${usersSection(users)}
+    ${matrixSection("TV Commission Matrix", "tv", tvModels, sizes, rates, modelCategories)}
     ${soundbarSection(soundbarModels, rates)}
     <section class="card">
       <h2>Uploaded Sales</h2>
@@ -335,7 +356,43 @@ async function adminHome(db) {
   `);
 }
 
-function matrixSection(title, itemType, models, sizes, rates) {
+function usersSection(users) {
+  return `
+    <section class="card">
+      <h2>Manage Users</h2>
+      <form method="post" action="/admin/users/save" class="row createUserRow">
+        <div><label>Username</label><input name="username" required></div>
+        <div><label>Email</label><input name="email" type="email" required></div>
+        <div><label>Region</label><select name="region" required><option value="">Choose region</option>${options(REGIONS, "")}</select></div>
+        <div><label>Store</label><input name="store" required></div>
+        <div><label>Password</label><input name="password" type="password" placeholder="required for new"></div>
+        <button>Create User</button>
+      </form>
+      <div class="userTable" role="table" aria-label="Users">
+        <div class="userTableHead" role="row">
+          <span>Username</span><span>Email</span><span>Region</span><span>Store</span><span>Created</span><span>Actions</span>
+        </div>
+        ${users.map((user) => `
+          <form method="post" action="/admin/users/save" class="userTableRow" role="row">
+            <input name="username" value="${attr(user.username)}" readonly>
+            <input name="email" type="email" value="${attr(user.email)}" required>
+            <select name="region" required>${options(REGIONS, user.region)}</select>
+            <input name="store" value="${attr(user.store)}" required>
+            <span class="createdAt">${escapeHtml(formatAdminDate(user.created_at))}</span>
+            <span class="userActions">
+              <button>Save</button>
+              <button class="ghost" formaction="/admin/users/reset-password">Reset to ${escapeHtml(DEFAULT_RESET_PASSWORD)}</button>
+              <button class="danger" formaction="/admin/users/delete" onclick="return confirm('Delete ${attr(user.username)}?');">Delete</button>
+            </span>
+          </form>
+        `).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function matrixSection(title, itemType, models, sizes, rates, modelCategories = {}) {
+  const isTv = itemType === "tv";
   return `
     <section class="card">
       <h2>${escapeHtml(title)}</h2>
@@ -351,12 +408,16 @@ function matrixSection(title, itemType, models, sizes, rates) {
           <button>Save All Current TV Rates</button>
           <a class="buttonLink ghost" href="/admin/rates/dated?itemType=${encodeURIComponent(itemType)}" target="_blank" rel="noopener">Dated TV Changes</a>
         </div>
-        <div class="matrixWrap"><table class="matrix"><thead><tr><th>Model</th>${sizes.map((size) => `<th>${escapeHtml(size)}"</th>`).join("")}</tr></thead><tbody>
-          ${models.map((model) => `<tr><th scope="row">${escapeHtml(model)}</th>${sizes.map((size) => rateInputCell(itemType, model, size, rates)).join("")}</tr>`).join("")}
+        <div class="matrixWrap"><table class="matrix"><thead><tr>${isTv ? "<th>Type</th>" : ""}<th>Model</th>${sizes.map((size) => `<th>${escapeHtml(size)}"</th>`).join("")}</tr></thead><tbody>
+          ${models.map((model) => `<tr>${isTv ? modelCategoryCell(model, modelCategories[model]) : ""}<th scope="row">${escapeHtml(model)}</th>${sizes.map((size) => rateInputCell(itemType, model, size, rates)).join("")}</tr>`).join("")}
         </tbody></table></div>
       </form>
     </section>
   `;
+}
+
+function modelCategoryCell(model, category) {
+  return `<td class="categoryCell"><input type="hidden" name="modelCategoryModel" value="${attr(model)}"><select name="modelCategory">${productTypeOptions(category || defaultModelCategory(model))}</select></td>`;
 }
 
 function soundbarSection(models, rates) {
@@ -450,7 +511,7 @@ function page(title, body) {
 }
 
 function adminCss() {
-  return "body{margin:0;background:#05030a;color:#f8fafc;font-family:Segoe UI,Arial,sans-serif}main{max-width:1180px;margin:0 auto;padding:28px 18px 60px}h1{margin:0 0 4px;font-size:34px}h2{margin:0 0 14px;font-size:20px}.muted{color:#9dabc0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}.card{background:rgba(24,27,34,.82);border:1px solid rgba(114,126,166,.65);border-radius:14px;padding:16px;margin:14px 0}.auth{max-width:430px;margin:54px auto}.kpi{font-size:32px;font-weight:800;color:#00aaa6}label{display:block;font-size:12px;color:#9dabc0;margin:10px 0 4px}input,select{box-sizing:border-box;width:100%;height:38px;border-radius:10px;border:1px solid rgba(120,136,166,.7);background:#0b0d11;color:#fff;padding:0 10px}button,.buttonLink{display:inline-flex;align-items:center;justify-content:center;min-height:38px;border:0;border-radius:10px;background:#00aaa6;color:#fff;font-weight:700;padding:0 14px;cursor:pointer;text-decoration:none}.ghost{background:rgba(120,136,166,.16);border:1px solid rgba(120,136,166,.42);color:#dbeafe}.danger{background:#b21c2d}.row{display:grid;grid-template-columns:1.2fr 1.4fr 1fr 1fr auto;gap:8px;align-items:end}.userEdit{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end;border-top:1px solid rgba(120,136,166,.25);padding:10px 0}.userEditForm{display:grid;grid-template-columns:1.1fr 1.5fr 1fr 1fr 1fr auto;gap:8px;align-items:end}.table{width:100%;border-collapse:collapse}.table th,.table td{border-bottom:1px solid rgba(120,136,166,.35);padding:8px;text-align:left;font-size:13px}.pill{display:inline-block;border:1px solid rgba(0,170,166,.6);border-radius:999px;padding:4px 8px;color:#00aaa6;font-size:12px}.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.error{color:#ff8b8b;font-weight:700}.notice{color:#7df2c7;font-weight:700}.matrixTools{display:grid;grid-template-columns:repeat(2,minmax(180px,1fr));gap:10px;margin:10px 0 14px}.modelDeleteList{display:grid;gap:8px;margin:0 0 12px}.modelChipGrid{display:flex;flex-wrap:wrap;gap:6px}.modelChip{display:inline-flex;align-items:center;gap:6px;min-height:30px;border:1px solid rgba(120,136,166,.3);border-radius:999px;background:rgba(11,13,17,.42);padding:3px 3px 3px 9px}.modelChip span{font-size:12px;color:#dbeafe}.modelChip button{min-height:24px;border-radius:999px;padding:0 8px;font-size:11px}.inlineForm{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}.stackForm{display:grid;gap:12px}.matrixActions{justify-content:flex-end;margin:4px 0}.datedHeader{display:grid;grid-template-columns:minmax(180px,260px) auto;gap:10px;align-items:end;margin:10px 0 14px}.matrixWrap{overflow:auto;border:1px solid rgba(120,136,166,.35);border-radius:12px}.matrix{width:100%;border-collapse:separate;border-spacing:0;min-width:760px}.soundbarMatrix{min-width:420px}.matrix th,.matrix td{border-bottom:1px solid rgba(120,136,166,.28);border-right:1px solid rgba(120,136,166,.2);padding:7px;text-align:left;font-size:12px}.matrix th{position:sticky;top:0;background:#10131a;z-index:1;color:#dbeafe}.matrix th:first-child{left:0;z-index:2}.matrix tbody th{top:auto;left:0;background:#10131a}.matrixInput{height:32px;padding:0 8px;min-width:74px}@media(max-width:980px){.userEdit,.userEditForm{grid-template-columns:1fr}.matrixTools{grid-template-columns:1fr}}@media(max-width:760px){.row,.datedHeader{grid-template-columns:1fr}.table{display:block;overflow:auto}}";
+  return "body{margin:0;background:#05030a;color:#f8fafc;font-family:Segoe UI,Arial,sans-serif}main{max-width:1180px;margin:0 auto;padding:28px 18px 60px}h1{margin:0 0 4px;font-size:34px}h2{margin:0 0 14px;font-size:20px}.muted{color:#9dabc0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}.card{background:rgba(24,27,34,.82);border:1px solid rgba(114,126,166,.65);border-radius:14px;padding:16px;margin:14px 0}.auth{max-width:430px;margin:54px auto}.kpi{font-size:32px;font-weight:800;color:#00aaa6}label{display:block;font-size:12px;color:#9dabc0;margin:10px 0 4px}input,select{box-sizing:border-box;width:100%;height:38px;border-radius:10px;border:1px solid rgba(120,136,166,.7);background:#0b0d11;color:#fff;padding:0 10px}button,.buttonLink{display:inline-flex;align-items:center;justify-content:center;min-height:38px;border:0;border-radius:10px;background:#00aaa6;color:#fff;font-weight:700;padding:0 14px;cursor:pointer;text-decoration:none}.ghost{background:rgba(120,136,166,.16);border:1px solid rgba(120,136,166,.42);color:#dbeafe}.danger{background:#b21c2d}.row{display:grid;grid-template-columns:1.2fr 1.4fr 1fr 1fr auto;gap:8px;align-items:end}.createUserRow{grid-template-columns:1fr 1.4fr 1fr 1fr 1fr auto}.table{width:100%;border-collapse:collapse}.table th,.table td{border-bottom:1px solid rgba(120,136,166,.35);padding:8px;text-align:left;font-size:13px}.pill{display:inline-block;border:1px solid rgba(0,170,166,.6);border-radius:999px;padding:4px 8px;color:#00aaa6;font-size:12px}.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.error{color:#ff8b8b;font-weight:700}.notice{color:#7df2c7;font-weight:700}.userTable{display:grid;gap:4px;margin-top:14px;overflow:auto}.userTableHead,.userTableRow{display:grid;grid-template-columns:1fr 1.5fr 1fr 1fr .8fr 2fr;gap:6px;align-items:center;min-width:1040px}.userTableHead{color:#9dabc0;font-size:12px;font-weight:800;padding:0 8px}.userTableRow{padding:8px;border-top:1px solid rgba(120,136,166,.28);background:rgba(11,13,17,.32);border-radius:10px}.createdAt{color:#dbeafe;font-size:13px}.userActions{display:flex;gap:6px;flex-wrap:wrap}.userActions button{min-height:32px;padding:0 10px;font-size:12px}.matrixTools{display:grid;grid-template-columns:repeat(2,minmax(180px,1fr));gap:10px;margin:10px 0 14px}.modelDeleteList{display:grid;gap:8px;margin:0 0 12px}.modelChipGrid{display:flex;flex-wrap:wrap;gap:6px}.modelChip{display:inline-flex;align-items:center;gap:6px;min-height:30px;border:1px solid rgba(120,136,166,.3);border-radius:999px;background:rgba(11,13,17,.42);padding:3px 3px 3px 9px}.modelChip span{font-size:12px;color:#dbeafe}.modelChip button{min-height:24px;border-radius:999px;padding:0 8px;font-size:11px}.inlineForm{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}.stackForm{display:grid;gap:12px}.matrixActions{justify-content:flex-end;margin:4px 0}.datedHeader{display:grid;grid-template-columns:minmax(180px,260px) auto;gap:10px;align-items:end;margin:10px 0 14px}.matrixWrap{overflow:auto;border:1px solid rgba(120,136,166,.35);border-radius:12px}.matrix{width:100%;border-collapse:separate;border-spacing:0;min-width:900px}.soundbarMatrix{min-width:420px}.matrix th,.matrix td{border-bottom:1px solid rgba(120,136,166,.28);border-right:1px solid rgba(120,136,166,.2);padding:7px;text-align:left;font-size:12px}.matrix th{position:sticky;top:0;background:#10131a;z-index:1;color:#dbeafe}.matrix th:first-child{left:0;z-index:2}.matrix tbody th{top:auto;left:0;background:#10131a}.categoryCell{min-width:132px}.categoryCell select,.matrixInput{height:32px;padding:0 8px}.matrixInput{min-width:74px}@media(max-width:980px){.userTableHead,.userTableRow{min-width:980px}.matrixTools{grid-template-columns:1fr}}@media(max-width:760px){.row,.createUserRow,.datedHeader{grid-template-columns:1fr}.table{display:block;overflow:auto}}";
 }
 
 async function clientPayload(db, user) {
@@ -483,7 +544,8 @@ async function publicMeta(db) {
     storesByRegion,
     models: await modelList(db, "tv"),
     soundbarModels: await modelList(db, "soundbar"),
-    sizes: await sizeList(db)
+    sizes: await sizeList(db),
+    modelCategories: await modelCategoryMap(db)
   };
 }
 
@@ -492,7 +554,7 @@ async function ensureDefaults(db) {
   const soundbarCount = await db.prepare("SELECT COUNT(*) value FROM product_models WHERE item_type='soundbar'").first();
   const sizeCount = await db.prepare("SELECT COUNT(*) value FROM product_sizes").first();
   if (Number(tvCount?.value || 0) <= 0) {
-    for (const [index, model] of TV_MODELS.entries()) await db.prepare("INSERT OR IGNORE INTO product_models (item_type,model,sort_order) VALUES ('tv',?,?)").bind(model, (index + 1) * 10).run();
+    for (const [index, model] of TV_MODELS.entries()) await db.prepare("INSERT OR IGNORE INTO product_models (item_type,model,category,sort_order) VALUES ('tv',?,?,?)").bind(model, defaultModelCategory(model), (index + 1) * 10).run();
   }
   if (Number(soundbarCount?.value || 0) <= 0) {
     for (const [index, model] of SOUNDBAR_MODELS.entries()) await db.prepare("INSERT OR IGNORE INTO product_models (item_type,model,sort_order) VALUES ('soundbar',?,?)").bind(model, (index + 1) * 10).run();
@@ -500,9 +562,17 @@ async function ensureDefaults(db) {
   if (Number(sizeCount?.value || 0) <= 0) {
     for (const [index, size] of SIZES.entries()) await db.prepare("INSERT OR IGNORE INTO product_sizes (size,sort_order) VALUES (?,?)").bind(size, (index + 1) * 10).run();
   }
+  await applyDefaultModelCategories(db);
 }
 
 async function ensureSchema(db) {
+  const tables = await all(db, "SELECT name FROM sqlite_master WHERE type='table' AND name='product_models'");
+  if (tables.length) {
+    const columns = await all(db, "PRAGMA table_info(product_models)");
+    if (!columns.some((column) => column.name === "category")) {
+      await db.prepare("ALTER TABLE product_models ADD COLUMN category TEXT NOT NULL DEFAULT ''").run();
+    }
+  }
   await db.prepare("CREATE TABLE IF NOT EXISTS commission_rate_history (item_type TEXT NOT NULL, model TEXT NOT NULL, size TEXT NOT NULL DEFAULT '', effective_from TEXT NOT NULL, value REAL NOT NULL DEFAULT 0, cleared INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, PRIMARY KEY (item_type, model, size, effective_from))").run();
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_commission_rate_history_effective ON commission_rate_history (item_type, model, size, effective_from)").run();
   await db.prepare("INSERT OR IGNORE INTO commission_rate_history (item_type, model, size, effective_from, value, cleared, created_at) SELECT item_type, model, size, '1970-01-01', value, 0, 0 FROM commission_rates").run();
@@ -611,14 +681,39 @@ async function modelList(db, itemType) {
   return (await all(db, "SELECT model FROM product_models WHERE item_type=? ORDER BY lower(model), model", itemType)).map((row) => row.model);
 }
 
+async function modelCategoryMap(db) {
+  const rows = await all(db, "SELECT model, category FROM product_models WHERE item_type='tv' ORDER BY lower(model), model");
+  const map = {};
+  for (const row of rows) {
+    const model = clean(row.model);
+    const category = normalizeProductType(row.category) || defaultModelCategory(model);
+    if (model && category) map[model] = category;
+  }
+  return map;
+}
+
 async function sizeList(db) {
   return (await all(db, "SELECT size FROM product_sizes ORDER BY sort_order, size")).map((row) => row.size);
 }
 
-async function saveModel(db, itemType, model) {
+async function saveModel(db, itemType, model, category = "") {
   if (!model) return;
   const max = await db.prepare("SELECT COALESCE(MAX(sort_order),0) maxSort FROM product_models WHERE item_type=?").bind(itemType).first();
-  await db.prepare("INSERT OR IGNORE INTO product_models (item_type,model,sort_order) VALUES (?,?,?)").bind(itemType, model, Number(max?.maxSort || 0) + 10).run();
+  const modelCategory = itemType === "tv" ? (normalizeProductType(category) || defaultModelCategory(model)) : "";
+  await db.prepare("INSERT OR IGNORE INTO product_models (item_type,model,category,sort_order) VALUES (?,?,?,?)").bind(itemType, model, modelCategory, Number(max?.maxSort || 0) + 10).run();
+  if (itemType === "tv" && modelCategory) await saveModelCategory(db, model, modelCategory);
+}
+
+async function saveModelCategory(db, model, category) {
+  if (!model) return;
+  const productType = normalizeProductType(category);
+  await db.prepare("UPDATE product_models SET category=? WHERE item_type='tv' AND model=?").bind(productType, model).run();
+}
+
+async function applyDefaultModelCategories(db) {
+  for (const [model, category] of Object.entries(DEFAULT_MODEL_CATEGORIES)) {
+    await db.prepare("UPDATE product_models SET category=? WHERE item_type='tv' AND model=? AND (category IS NULL OR category='')").bind(category, model).run();
+  }
 }
 
 async function deleteModel(db, itemType, model) {
@@ -730,8 +825,27 @@ function options(values, selected) {
   return values.map((value) => `<option${value === selected ? " selected" : ""}>${escapeHtml(value)}</option>`).join("");
 }
 
+function productTypeOptions(selected) {
+  return `<option value="">Choose type</option>${PRODUCT_TYPES.map((value) => `<option${value === selected ? " selected" : ""}>${escapeHtml(value)}</option>`).join("")}`;
+}
+
+function normalizeProductType(value) {
+  const cleanValue = clean(value).toUpperCase();
+  return PRODUCT_TYPES.find((item) => item === cleanValue) || "";
+}
+
+function defaultModelCategory(model) {
+  return DEFAULT_MODEL_CATEGORIES[clean(model)] || "";
+}
+
 function money(value) {
   return `GBP ${Number(value || 0).toLocaleString("en-GB", { maximumFractionDigits: 0 })}`;
+}
+
+function formatAdminDate(value) {
+  const timestamp = Number(value || 0);
+  if (!timestamp) return "-";
+  return new Date(timestamp).toLocaleDateString("en-GB");
 }
 
 function canonicalRegion(region) {
