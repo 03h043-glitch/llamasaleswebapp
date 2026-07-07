@@ -1369,9 +1369,7 @@ function commissionValue(sale) {
 }
 
 function defaultCommissionValue(sale) {
-  if (saleItemType(sale) === "soundbar") return OTHER_HISENSE_COMMISSION;
-  const index = premiumIndex(sale.model);
-  return index >= 0 ? DEFAULT_COMMISSION[index] : OTHER_HISENSE_COMMISSION;
+  return 0;
 }
 
 function commissionRateKey(sale) {
