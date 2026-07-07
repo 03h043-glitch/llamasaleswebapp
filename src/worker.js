@@ -545,7 +545,9 @@ async function publicMeta(db) {
     models: await modelList(db, "tv"),
     soundbarModels: await modelList(db, "soundbar"),
     sizes: await sizeList(db),
-    modelCategories: await modelCategoryMap(db)
+    modelCategories: await modelCategoryMap(db),
+    commissionRates: await ratesClientMap(db),
+    commissionRateHistory: await rateHistoryClientList(db)
   };
 }
 

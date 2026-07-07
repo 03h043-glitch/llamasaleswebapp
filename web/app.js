@@ -128,7 +128,11 @@ app.addEventListener("click", async (event) => {
     state.page = value;
     state.menuOpen = false;
     render();
-    if (value === "commission") await syncNow(false);
+    if (value === "commission") {
+      await loadMeta();
+      render();
+      await syncNow(false);
+    }
   } else if (action === "dashboard") {
     goDashboard();
   } else if (action === "sign-out") {
@@ -1158,6 +1162,14 @@ function applyMetaPayload(meta) {
   }
   if (Array.isArray(meta.sizes)) {
     state.meta.sizes = cleanOptions(meta.sizes, SIZES);
+  }
+  if (meta.commissionRates && typeof meta.commissionRates === "object") {
+    state.rates = meta.commissionRates;
+    writeJson(KEY.rates, state.rates);
+  }
+  if (Array.isArray(meta.commissionRateHistory)) {
+    state.rateHistory = meta.commissionRateHistory.map(normalizeRateHistory).filter(Boolean);
+    writeJson(KEY.rateHistory, state.rateHistory);
   }
   if (meta.modelCategories && typeof meta.modelCategories === "object") {
     state.meta.modelCategories = normalizeModelCategories(meta.modelCategories);
