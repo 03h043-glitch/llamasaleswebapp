@@ -491,6 +491,14 @@ h3 {
   color: var(--accent-contrast);
 }
 
+:root[data-theme="light"] .seg.active,
+:root[data-theme="light"] .dashboard-filters .seg.active,
+:root[data-theme="light"] .compact-tabs .seg.active {
+  background: var(--hisense);
+  border-color: transparent;
+  color: var(--accent-contrast);
+}
+
 .dashboard-filters {
   gap: 4px;
   padding: 5px;
