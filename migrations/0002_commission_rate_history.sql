@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS commission_rate_history (
   effective_from TEXT NOT NULL,
   value REAL NOT NULL DEFAULT 0,
   cleared INTEGER NOT NULL DEFAULT 0,
+  source TEXT NOT NULL DEFAULT 'current',
   created_at INTEGER NOT NULL,
   PRIMARY KEY (item_type, model, size, effective_from)
 );
@@ -19,6 +20,7 @@ INSERT OR IGNORE INTO commission_rate_history (
   effective_from,
   value,
   cleared,
+  source,
   created_at
 )
 SELECT
@@ -28,5 +30,6 @@ SELECT
   '1970-01-01',
   value,
   0,
+  'current',
   0
 FROM commission_rates;

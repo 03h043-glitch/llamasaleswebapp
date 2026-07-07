@@ -127,7 +127,7 @@ async function handleApi(request, env, url) {
     if (!model || (itemType === "tv" && !size)) return json({ ok: false, error: "Model and size are required" }, request, 400);
     await saveModel(db, itemType, model);
     if (size) await saveSize(db, size);
-    await saveCommissionRate(db, itemType, model, size, value, todayIso(), false);
+    await saveCommissionRate(db, itemType, model, size, value, todayIso(), false, "current");
     return json(await clientPayload(db, user), request);
   }
 
@@ -217,9 +217,9 @@ async function handleAdmin(request, env, url) {
     const valueText = clean(form.get("value"));
     if (model && (itemType === "soundbar" || size)) {
       if (!valueText) {
-        await saveCommissionRate(db, itemType, model, size, 0, todayIso(), true);
+        await saveCommissionRate(db, itemType, model, size, 0, todayIso(), true, "current");
       } else {
-        await saveCommissionRate(db, itemType, model, size, Number(valueText || 0), todayIso(), false);
+        await saveCommissionRate(db, itemType, model, size, Number(valueText || 0), todayIso(), false, "current");
       }
     }
     return redirect("/admin");
@@ -283,19 +283,19 @@ async function adminBatchSaveRates(request, db, datedOnly) {
 
     if (datedOnly) {
       if (!valueText) continue;
-      await saveCommissionRate(db, itemType, model, size, Number(valueText || 0), effectiveFrom, false);
+      await saveCommissionRate(db, itemType, model, size, Number(valueText || 0), effectiveFrom, false, "dated");
       continue;
     }
 
     const hasCurrentValue = Object.prototype.hasOwnProperty.call(currentRates, key);
     if (!valueText) {
-      if (hasCurrentValue) await saveCommissionRate(db, itemType, model, size, 0, effectiveFrom, true);
+      if (hasCurrentValue) await saveCommissionRate(db, itemType, model, size, 0, effectiveFrom, true, "current");
       continue;
     }
 
     const nextValue = Number(valueText || 0);
     if (!hasCurrentValue || Number(currentRates[key] || 0) !== nextValue) {
-      await saveCommissionRate(db, itemType, model, size, nextValue, effectiveFrom, false);
+      await saveCommissionRate(db, itemType, model, size, nextValue, effectiveFrom, false, "current");
     }
   }
 
@@ -573,9 +573,13 @@ async function ensureSchema(db) {
       await db.prepare("ALTER TABLE product_models ADD COLUMN category TEXT NOT NULL DEFAULT ''").run();
     }
   }
-  await db.prepare("CREATE TABLE IF NOT EXISTS commission_rate_history (item_type TEXT NOT NULL, model TEXT NOT NULL, size TEXT NOT NULL DEFAULT '', effective_from TEXT NOT NULL, value REAL NOT NULL DEFAULT 0, cleared INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, PRIMARY KEY (item_type, model, size, effective_from))").run();
+  await db.prepare("CREATE TABLE IF NOT EXISTS commission_rate_history (item_type TEXT NOT NULL, model TEXT NOT NULL, size TEXT NOT NULL DEFAULT '', effective_from TEXT NOT NULL, value REAL NOT NULL DEFAULT 0, cleared INTEGER NOT NULL DEFAULT 0, source TEXT NOT NULL DEFAULT 'current', created_at INTEGER NOT NULL, PRIMARY KEY (item_type, model, size, effective_from))").run();
+  const historyColumns = await all(db, "PRAGMA table_info(commission_rate_history)");
+  if (!historyColumns.some((column) => column.name === "source")) {
+    await db.prepare("ALTER TABLE commission_rate_history ADD COLUMN source TEXT NOT NULL DEFAULT 'current'").run();
+  }
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_commission_rate_history_effective ON commission_rate_history (item_type, model, size, effective_from)").run();
-  await db.prepare("INSERT OR IGNORE INTO commission_rate_history (item_type, model, size, effective_from, value, cleared, created_at) SELECT item_type, model, size, '1970-01-01', value, 0, 0 FROM commission_rates").run();
+  await db.prepare("INSERT OR IGNORE INTO commission_rate_history (item_type, model, size, effective_from, value, cleared, source, created_at) SELECT item_type, model, size, '1970-01-01', value, 0, 'current', 0 FROM commission_rates").run();
 }
 
 async function authenticatedUser(db, body) {
@@ -614,10 +618,10 @@ function normalizeSale(raw, user) {
 }
 
 async function ratesClientMap(db) {
-  const rows = await effectiveRateRows(db, todayIso());
+  const rows = await all(db, "SELECT item_type, model, size, value FROM commission_rates ORDER BY item_type, model, size");
   const map = {};
   for (const row of rows) {
-    if (!Number(row.cleared || 0)) map[rateKey(row.item_type, row.model, row.size)] = Number(row.value || 0);
+    map[rateKey(row.item_type, row.model, row.size)] = Number(row.value || 0);
   }
   return map;
 }
@@ -627,14 +631,15 @@ async function ratesMap(db) {
 }
 
 async function rateHistoryClientList(db) {
-  const rows = await all(db, "SELECT item_type, model, size, effective_from, value, cleared FROM commission_rate_history ORDER BY item_type, model, size, effective_from");
+  const rows = await all(db, "SELECT item_type, model, size, effective_from, value, cleared, source FROM commission_rate_history ORDER BY item_type, model, size, effective_from");
   return rows.map((row) => ({
     itemType: row.item_type === "soundbar" ? "soundbar" : "tv",
     model: row.model || "",
     size: row.size || "",
     effectiveFrom: row.effective_from || "1970-01-01",
     value: Number(row.value || 0),
-    cleared: Boolean(Number(row.cleared || 0))
+    cleared: Boolean(Number(row.cleared || 0)),
+    source: clean(row.source) === "dated" ? "dated" : "current"
   }));
 }
 
@@ -656,12 +661,13 @@ async function effectiveRateRows(db, effectiveDate) {
   `, effectiveDate);
 }
 
-async function saveCommissionRate(db, itemType, model, size, value, effectiveFrom, cleared) {
+async function saveCommissionRate(db, itemType, model, size, value, effectiveFrom, cleared, source = "current") {
   await saveModel(db, itemType, model);
   if (itemType === "tv") await saveSize(db, size);
   const cleanDate = validDateOrToday(effectiveFrom);
-  await db.prepare("INSERT INTO commission_rate_history (item_type,model,size,effective_from,value,cleared,created_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(item_type,model,size,effective_from) DO UPDATE SET value=excluded.value, cleared=excluded.cleared, created_at=excluded.created_at")
-    .bind(itemType, model, size, cleanDate, Number(value || 0), cleared ? 1 : 0, Date.now()).run();
+  const cleanSource = source === "dated" ? "dated" : "current";
+  await db.prepare("INSERT INTO commission_rate_history (item_type,model,size,effective_from,value,cleared,source,created_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(item_type,model,size,effective_from) DO UPDATE SET value=excluded.value, cleared=excluded.cleared, source=excluded.source, created_at=excluded.created_at")
+    .bind(itemType, model, size, cleanDate, Number(value || 0), cleared ? 1 : 0, cleanSource, Date.now()).run();
 
   if (cleanDate <= todayIso()) {
     if (cleared) {

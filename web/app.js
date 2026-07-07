@@ -1381,7 +1381,7 @@ function datedCommissionOverride(sale, key) {
   const saleDate = String(sale.date || todayIso());
   let match = null;
   for (const row of state.rateHistory) {
-    if (!row || row.key !== key || row.effectiveFrom > saleDate) continue;
+    if (!row || row.source !== "dated" || row.key !== key || row.effectiveFrom > saleDate) continue;
     if (!match || row.effectiveFrom > match.effectiveFrom) match = row;
   }
   return match ? { found: true, value: match.value, cleared: match.cleared } : { found: false };
@@ -1401,7 +1401,8 @@ function normalizeRateHistory(row) {
     key: itemType === "soundbar" ? `soundbar|${model}|` : `${model}|${size}`,
     effectiveFrom,
     value: Number(row.value || 0),
-    cleared: Boolean(row.cleared)
+    cleared: Boolean(row.cleared),
+    source: String(row.source || "").trim() === "dated" ? "dated" : "current"
   };
 }
 
