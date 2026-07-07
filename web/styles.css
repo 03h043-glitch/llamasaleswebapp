@@ -358,6 +358,11 @@ h3 {
   stroke-linecap: butt;
 }
 
+:root[data-theme="light"] .brand-share-track {
+  stroke: rgba(255, 251, 243, 0.98);
+  filter: drop-shadow(0 2px 3px rgba(91, 104, 124, 0.2));
+}
+
 .brand-share-arc-segment {
   stroke-linecap: butt;
   filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.34));
@@ -371,6 +376,10 @@ h3 {
   transform: translateY(-4px);
   vector-effect: non-scaling-stroke;
   pointer-events: none;
+}
+
+:root[data-theme="light"] .brand-share-highlight {
+  stroke: rgba(255, 255, 255, 0.56);
 }
 
 .brand-share-threshold {
@@ -472,6 +481,10 @@ h3 {
   font-weight: 800;
 }
 
+:root[data-theme="light"] .seg {
+  background: rgba(255, 255, 255, 0.72);
+}
+
 .seg.active {
   background: var(--blue);
   border-color: transparent;
@@ -484,6 +497,11 @@ h3 {
   border-color: rgba(142, 154, 194, 0.78);
   border-radius: 14px;
   background: rgba(14, 16, 20, 0.64);
+}
+
+:root[data-theme="light"] .dashboard-filters {
+  border-color: rgba(91, 104, 124, 0.44);
+  background: rgba(255, 251, 243, 0.92);
 }
 
 .dashboard-filters .seg-row {
