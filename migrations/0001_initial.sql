@@ -47,9 +47,21 @@ CREATE TABLE IF NOT EXISTS product_sizes (
   sort_order INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS barcodes (
+  id TEXT PRIMARY KEY,
+  description TEXT NOT NULL,
+  start_date TEXT NOT NULL,
+  end_date TEXT NOT NULL,
+  code TEXT NOT NULL,
+  applies_to TEXT NOT NULL DEFAULT '[]',
+  created_by TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_sales_username_date ON sales (username, date);
 CREATE INDEX IF NOT EXISTS idx_sales_region_store_date ON sales (region, store, date);
 CREATE INDEX IF NOT EXISTS idx_sales_date ON sales (date);
+CREATE INDEX IF NOT EXISTS idx_barcodes_dates ON barcodes (start_date, end_date);
 
 INSERT OR IGNORE INTO product_models (item_type, model, category, sort_order) VALUES
   ('tv', 'A4Q', 'UHD', 10),

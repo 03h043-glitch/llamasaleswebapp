@@ -62,7 +62,8 @@ async function handleApi(request, env, url) {
     const users = await count(db, "users");
     const sales = await count(db, "sales");
     const commissionRates = await count(db, "commission_rates");
-    return json({ ok: true, serverTime: new Date().toISOString(), users, sales, commissionRates }, request);
+    const barcodes = await count(db, "barcodes");
+    return json({ ok: true, serverTime: new Date().toISOString(), users, sales, commissionRates, barcodes }, request);
   }
 
   if (request.method === "GET" && url.pathname === "/api/meta") {
@@ -113,7 +114,25 @@ async function handleApi(request, env, url) {
         await upsertSale(db, sale);
       }
     }
+    if (Array.isArray(body.barcodes)) {
+      for (const rawBarcode of body.barcodes) {
+        const barcode = normalizeBarcodePayload(rawBarcode, user);
+        if (barcode) await saveBarcode(db, barcode);
+      }
+    }
+    await purgeExpiredBarcodes(db);
     return json(await clientPayload(db, user), request);
+  }
+
+  if (request.method === "POST" && url.pathname === "/api/barcodes/save") {
+    const body = await request.json();
+    const user = await authenticatedUser(db, body);
+    if (!user) return json({ ok: false, error: "Not authenticated" }, request, 401);
+    const barcode = normalizeBarcodePayload(body, user);
+    if (!barcode) return json({ ok: false, error: "Description, valid dates, 15 digit code, models, and sizes are required" }, request, 400);
+    await saveBarcode(db, barcode);
+    await purgeExpiredBarcodes(db);
+    return json(await publicMeta(db), request);
   }
 
   if (request.method === "POST" && url.pathname === "/api/rates/save") {
@@ -528,6 +547,7 @@ async function clientPayload(db, user) {
 
 async function publicMeta(db) {
   await ensureDefaults(db);
+  await purgeExpiredBarcodes(db);
   const users = await all(db, "SELECT region, store FROM users");
   const storesByRegion = Object.fromEntries(REGIONS.map((region) => [region, []]));
   for (const user of users) {
@@ -547,7 +567,8 @@ async function publicMeta(db) {
     sizes: await sizeList(db),
     modelCategories: await modelCategoryMap(db),
     commissionRates: await ratesClientMap(db),
-    commissionRateHistory: await rateHistoryClientList(db)
+    commissionRateHistory: await rateHistoryClientList(db),
+    barcodes: await activeBarcodes(db)
   };
 }
 
@@ -576,11 +597,13 @@ async function ensureSchema(db) {
     }
   }
   await db.prepare("CREATE TABLE IF NOT EXISTS commission_rate_history (item_type TEXT NOT NULL, model TEXT NOT NULL, size TEXT NOT NULL DEFAULT '', effective_from TEXT NOT NULL, value REAL NOT NULL DEFAULT 0, cleared INTEGER NOT NULL DEFAULT 0, source TEXT NOT NULL DEFAULT 'current', created_at INTEGER NOT NULL, PRIMARY KEY (item_type, model, size, effective_from))").run();
+  await db.prepare("CREATE TABLE IF NOT EXISTS barcodes (id TEXT PRIMARY KEY, description TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT NOT NULL, code TEXT NOT NULL, applies_to TEXT NOT NULL DEFAULT '[]', created_by TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL)").run();
   const historyColumns = await all(db, "PRAGMA table_info(commission_rate_history)");
   if (!historyColumns.some((column) => column.name === "source")) {
     await db.prepare("ALTER TABLE commission_rate_history ADD COLUMN source TEXT NOT NULL DEFAULT 'current'").run();
   }
   await db.prepare("CREATE INDEX IF NOT EXISTS idx_commission_rate_history_effective ON commission_rate_history (item_type, model, size, effective_from)").run();
+  await db.prepare("CREATE INDEX IF NOT EXISTS idx_barcodes_dates ON barcodes (start_date, end_date)").run();
   await db.prepare("INSERT OR IGNORE INTO commission_rate_history (item_type, model, size, effective_from, value, cleared, source, created_at) SELECT item_type, model, size, '1970-01-01', value, 0, 'current', 0 FROM commission_rates").run();
 }
 
@@ -616,6 +639,65 @@ function normalizeSale(raw, user) {
     region: user.region,
     store: user.store,
     createdAt: Number(raw?.createdAt || Date.now())
+  };
+}
+
+function normalizeBarcodePayload(raw, user) {
+  const description = clean(raw?.description).slice(0, 120);
+  const code = clean(raw?.code).replace(/\D/g, "");
+  const startDate = strictDate(raw?.startDate || raw?.start_date);
+  const endDate = strictDate(raw?.endDate || raw?.end_date);
+  const models = uniqueCleanList(raw?.models);
+  const sizes = uniqueCleanList(raw?.sizes);
+  if (!description || code.length !== 15 || !models.length || !sizes.length || endDate < startDate) return null;
+  const appliesTo = [];
+  for (const model of models) {
+    for (const size of sizes) appliesTo.push({ model, size });
+  }
+  return {
+    id: clean(raw?.id) || crypto.randomUUID(),
+    description,
+    startDate,
+    endDate,
+    code,
+    models,
+    sizes,
+    appliesTo,
+    createdBy: clean(raw?.createdBy || raw?.created_by || user.username),
+    createdAt: Number(raw?.createdAt || raw?.created_at || Date.now())
+  };
+}
+
+async function saveBarcode(db, barcode) {
+  await db.prepare("INSERT INTO barcodes (id,description,start_date,end_date,code,applies_to,created_by,created_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET description=excluded.description, start_date=excluded.start_date, end_date=excluded.end_date, code=excluded.code, applies_to=excluded.applies_to, created_by=excluded.created_by")
+    .bind(barcode.id, barcode.description, barcode.startDate, barcode.endDate, barcode.code, JSON.stringify(barcode.appliesTo), barcode.createdBy, barcode.createdAt).run();
+}
+
+async function activeBarcodes(db) {
+  const today = todayIso();
+  const rows = await all(db, "SELECT * FROM barcodes WHERE start_date<=? AND end_date>=? ORDER BY end_date ASC, description ASC", today, today);
+  return rows.map(barcodeToClient);
+}
+
+async function purgeExpiredBarcodes(db) {
+  await db.prepare("DELETE FROM barcodes WHERE end_date < ?").bind(todayIso()).run();
+}
+
+function barcodeToClient(row) {
+  const appliesTo = parseJsonArray(row.applies_to);
+  const models = uniqueCleanList(appliesTo.map((item) => item?.model));
+  const sizes = uniqueCleanList(appliesTo.map((item) => item?.size));
+  return {
+    id: row.id,
+    description: row.description,
+    startDate: row.start_date,
+    endDate: row.end_date,
+    code: row.code,
+    models,
+    sizes,
+    appliesTo,
+    createdBy: row.created_by,
+    createdAt: Number(row.created_at || 0)
   };
 }
 
@@ -745,7 +827,8 @@ async function buildBackup(db) {
     commissionRates: await all(db, "SELECT * FROM commission_rates"),
     commissionRateHistory: await all(db, "SELECT * FROM commission_rate_history"),
     productModels: await all(db, "SELECT * FROM product_models"),
-    productSizes: await all(db, "SELECT * FROM product_sizes")
+    productSizes: await all(db, "SELECT * FROM product_sizes"),
+    barcodes: await all(db, "SELECT * FROM barcodes")
   };
 }
 
@@ -755,8 +838,16 @@ function todayIso() {
 
 function validDateOrToday(value) {
   const text = clean(value);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
-  return todayIso();
+  return strictDate(text) || todayIso();
+}
+
+function strictDate(value) {
+  const text = clean(value);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    const date = new Date(`${text}T00:00:00Z`);
+    if (!Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === text) return text;
+  }
+  return "";
 }
 
 async function adminPasswordHash(db) {
@@ -863,6 +954,24 @@ function canonicalRegion(region) {
 
 function clean(value) {
   return String(value ?? "").trim();
+}
+
+function uniqueCleanList(values) {
+  const output = [];
+  for (const value of Array.isArray(values) ? values : []) {
+    const text = clean(value);
+    if (text && !output.some((item) => item.toLowerCase() === text.toLowerCase())) output.push(text);
+  }
+  return output.sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base", numeric: true }));
+}
+
+function parseJsonArray(value) {
+  try {
+    const parsed = JSON.parse(String(value || "[]"));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 function attr(value) {

@@ -62,8 +62,8 @@ const BRAND_COLORS = {
   Other: "#cbd5e1"
 };
 const APP_BUILD = {
-  version: "v21",
-  baseCommit: "103079d",
+  version: "v22",
+  baseCommit: "69c7135",
   repo: "03h043-glitch/llamasaleswebapp"
 };
 const DEFAULT_APPEARANCE = { theme: "dark", palette: "default" };
@@ -86,6 +86,22 @@ const PALETTES = [
   { id: "pastel-pink", name: "Pastel Pink", color: "#d36aa0", contrast: "#111827" },
   { id: "neon-pink", name: "Neon Pink", color: "#ff2bd6", contrast: "#ffffff" }
 ];
+const CODE128_PATTERNS = [
+  "212222", "222122", "222221", "121223", "121322", "131222", "122213", "122312",
+  "132212", "221213", "221312", "231212", "112232", "122132", "122231", "113222",
+  "123122", "123221", "223211", "221132", "221231", "213212", "223112", "312131",
+  "311222", "321122", "321221", "312212", "322112", "322211", "212123", "212321",
+  "232121", "111323", "131123", "131321", "112313", "132113", "132311", "211313",
+  "231113", "231311", "112133", "112331", "132131", "113123", "113321", "133121",
+  "313121", "211331", "231131", "213113", "213311", "213131", "311123", "311321",
+  "331121", "312113", "312311", "332111", "314111", "221411", "431111", "111224",
+  "111422", "121124", "121421", "141122", "141221", "112214", "112412", "122114",
+  "122411", "142112", "142211", "241211", "221114", "413111", "241112", "134111",
+  "111242", "121142", "121241", "114212", "124112", "124211", "411212", "421112",
+  "421211", "212141", "214121", "412121", "111143", "111341", "131141", "114113",
+  "114311", "411113", "411311", "113141", "114131", "311141", "411131", "211412",
+  "211214", "211232", "2331112"
+];
 
 const KEY = {
   apiUrl: "llamasales.pwa.apiUrl",
@@ -94,6 +110,7 @@ const KEY = {
   deletedSales: "llamasales.pwa.deletedSales",
   rates: "llamasales.pwa.rates",
   rateHistory: "llamasales.pwa.rateHistory",
+  barcodes: "llamasales.pwa.barcodes",
   meta: "llamasales.pwa.meta",
   ui: "llamasales.pwa.ui",
   preferences: "llamasales.pwa.preferences",
@@ -114,12 +131,15 @@ const state = {
   deletedSales: readJson(KEY.deletedSales, []),
   rates: readJson(KEY.rates, {}),
   rateHistory: readJson(KEY.rateHistory, []),
+  barcodes: readJson(KEY.barcodes, []),
   session: readJson(KEY.session, null),
   meta: readJson(KEY.meta, { regions: REGIONS, storesByRegion: {}, models: MODELS, soundbarModels: SOUNDBAR_MODELS, sizes: SIZES, modelCategories: DEFAULT_MODEL_CATEGORIES }),
   filters: { timeframe: "Today", scope: "Store" },
   salesDay: todayIso(),
   salesSort: "time",
   editSaleId: "",
+  barcodeFormOpen: false,
+  barcodeSort: "model",
   commissionView: "Today",
   selectedPayPeriod: "",
   ui: readJson(KEY.ui, { commissionFloatHidden: false, commissionFloatX: null, commissionFloatY: null }),
@@ -171,9 +191,11 @@ app.addEventListener("click", async (event) => {
     state.menuOpen = false;
     state.userPanelOpen = false;
     render();
-    if (value === "commission") {
+    if (value === "commission" || value === "barcodes") {
       await loadMeta();
       render();
+    }
+    if (value === "commission") {
       await syncNow(false);
     }
   } else if (action === "dashboard") {
@@ -206,6 +228,16 @@ app.addEventListener("click", async (event) => {
     render();
   } else if (action === "pay-period") {
     state.selectedPayPeriod = value;
+    render();
+  } else if (action === "barcode-sort") {
+    state.barcodeSort = value || "model";
+    render();
+  } else if (action === "toggle-barcode-form") {
+    state.barcodeFormOpen = !state.barcodeFormOpen;
+    render();
+  } else if (action === "toggle-commission-float") {
+    state.ui.commissionFloatHidden = !state.ui.commissionFloatHidden;
+    writeJson(KEY.ui, state.ui);
     render();
   } else if (action === "hide-commission-float") {
     state.ui.commissionFloatHidden = true;
@@ -276,6 +308,8 @@ app.addEventListener("submit", async (event) => {
     await saveSale(data);
   } else if (formName === "sale-edit") {
     await saveSaleEdit(data);
+  } else if (formName === "barcode") {
+    await saveBarcode(form);
   } else if (formName === "asm") {
     await unlockAsm(data);
   } else if (formName === "rate") {
@@ -400,9 +434,14 @@ function renderShell(account) {
         <button class="icon-btn" data-action="share" aria-label="Share">${icon("share")}</button>
       </nav>
 
+      <nav class="utility-nav">
+        <button class="icon-btn ${state.ui.commissionFloatHidden ? "" : "active"}" data-action="toggle-commission-float" aria-label="Toggle daily commission">${icon("cash")}</button>
+        <button class="icon-btn ${state.page === "barcodes" ? "active" : ""}" data-action="page" data-value="barcodes" aria-label="Barcodes">${icon("barcode")}</button>
+      </nav>
+
       ${state.menuOpen ? renderMenu() : ""}
       ${state.userPanelOpen ? renderUserPanel(account) : ""}
-      ${state.page === "dashboard" ? renderCommissionFloat(account) : ""}
+      ${renderCommissionFloat(account)}
       ${toastHtml()}
     </main>
   `;
@@ -412,6 +451,7 @@ function renderPage(account) {
   if (state.page === "add") return renderAddSale(account);
   if (state.page === "todaySales") return renderTodaysSales(account);
   if (state.page === "commission") return renderCommission(account);
+  if (state.page === "barcodes") return renderBarcodes(account);
   if (state.page === "asm") return renderAsm(account);
   if (state.page === "config") return renderCommissionConfig();
   if (state.page === "settings") return renderSettings();
@@ -701,6 +741,126 @@ function saleTimeLabel(sale) {
   const timestamp = Number(sale.createdAt || 0);
   if (!timestamp) return "";
   return new Date(timestamp).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+}
+
+function renderBarcodes() {
+  const rows = sortedActiveBarcodes();
+  return `
+    <div class="page-heading-row">
+      <div>
+        <h2>Barcode Lookup</h2>
+        <p class="muted">${rows.length} active barcode${rows.length === 1 ? "" : "s"}</p>
+      </div>
+      <button class="mini-btn" data-action="toggle-barcode-form">${state.barcodeFormOpen ? "Close" : "Add Barcode"}</button>
+    </div>
+    ${state.barcodeFormOpen ? renderBarcodeForm() : ""}
+    <div class="segmented compact-tabs">
+      <div class="seg-row three">
+        ${buttonSeg("barcode-sort", "model", "Model", state.barcodeSort === "model")}
+        ${buttonSeg("barcode-sort", "end", "Ending", state.barcodeSort === "end")}
+        ${buttonSeg("barcode-sort", "start", "Starting", state.barcodeSort === "start")}
+      </div>
+    </div>
+    <section class="card barcode-list-card">
+      ${rows.length ? rows.map(barcodeCard).join("") : `<p class="muted">No active barcodes.</p>`}
+    </section>
+  `;
+}
+
+function renderBarcodeForm() {
+  const today = todayIso();
+  return `
+    <form class="card stack barcode-form" data-form="barcode">
+      <h3>Add Barcode</h3>
+      <div class="field">
+        <label>Offer Description</label>
+        <input name="description" maxlength="90" placeholder="Example: GBP 50 off selected U7Q TVs" required>
+      </div>
+      <div class="barcode-date-grid">
+        <div class="field"><label>Start Date</label><input name="startDate" type="date" value="${today}" required></div>
+        <div class="field"><label>End Date</label><input name="endDate" type="date" value="${today}" required></div>
+      </div>
+      <div class="field">
+        <label>15 Digit Code</label>
+        <input name="code" inputmode="numeric" pattern="\\d{15}" minlength="15" maxlength="15" placeholder="123456789012345" required>
+      </div>
+      <div class="field">
+        <label>Models Affected</label>
+        <div class="barcode-check-grid">
+          ${modelOptions().map((model) => `<label class="check-pill"><input type="checkbox" name="models" value="${esc(model)}"><span>${esc(model)}</span></label>`).join("")}
+        </div>
+      </div>
+      <div class="field">
+        <label>Sizes Affected</label>
+        <div class="barcode-check-grid sizes">
+          ${sizeOptions().map((size) => `<label class="check-pill"><input type="checkbox" name="sizes" value="${esc(size)}"><span>${esc(size)}"</span></label>`).join("")}
+        </div>
+      </div>
+      <button class="button">Save Barcode</button>
+    </form>
+  `;
+}
+
+function barcodeCard(barcode) {
+  const dates = `${shortDate(parseIsoDate(barcode.startDate))} - ${shortDate(parseIsoDate(barcode.endDate))}`;
+  return `
+    <article class="barcode-item">
+      <div class="barcode-copy">
+        <strong>${esc(barcode.description || "Barcode offer")}</strong>
+        <span>${esc(barcodeModelLabel(barcode))}</span>
+        <small>${esc(dates)}</small>
+      </div>
+      <div class="barcode-art">
+        ${barcodeSvg(barcode.code)}
+        <span>${esc(groupBarcodeCode(barcode.code))}</span>
+      </div>
+    </article>
+  `;
+}
+
+function barcodeModelLabel(barcode) {
+  const models = barcode.models?.length ? barcode.models.join(", ") : "All models";
+  const sizes = barcode.sizes?.length ? barcode.sizes.map((size) => `${size}"`).join(", ") : "All sizes";
+  return `${models} | ${sizes}`;
+}
+
+function barcodeSvg(code) {
+  const rendered = code128Bars(code);
+  return `<svg class="barcode-svg" viewBox="0 0 ${rendered.width} 54" role="img" aria-label="Barcode ${esc(code)}">${rendered.bars}</svg>`;
+}
+
+function code128Bars(code) {
+  const digits = String(code || "").replace(/\D/g, "").slice(0, 15);
+  const values = [104, ...digits.split("").map((digit) => digit.charCodeAt(0) - 32)];
+  const checksum = values.reduce((total, value, index) => total + (index === 0 ? value : value * index), 0) % 103;
+  values.push(checksum, 106);
+
+  let x = 10;
+  let bars = "";
+  for (const value of values) {
+    const pattern = CODE128_PATTERNS[value] || "";
+    for (let index = 0; index < pattern.length; index += 1) {
+      const width = Number(pattern[index] || 0);
+      if (index % 2 === 0 && width > 0) bars += `<rect x="${x}" y="7" width="${width}" height="40"></rect>`;
+      x += width;
+    }
+  }
+  return { width: x + 10, bars };
+}
+
+function groupBarcodeCode(code) {
+  return String(code || "").replace(/(\d{3})(?=\d)/g, "$1 ").trim();
+}
+
+function sortedActiveBarcodes() {
+  const today = todayIso();
+  const rows = state.barcodes
+    .map(normalizeBarcode)
+    .filter(Boolean)
+    .filter((barcode) => barcode.startDate <= today && barcode.endDate >= today);
+  if (state.barcodeSort === "end") return rows.sort((a, b) => a.endDate.localeCompare(b.endDate) || barcodeModelLabel(a).localeCompare(barcodeModelLabel(b)));
+  if (state.barcodeSort === "start") return rows.sort((a, b) => a.startDate.localeCompare(b.startDate) || barcodeModelLabel(a).localeCompare(barcodeModelLabel(b)));
+  return rows.sort((a, b) => barcodeModelLabel(a).localeCompare(barcodeModelLabel(b)) || a.endDate.localeCompare(b.endDate));
 }
 
 function renderCommission(account) {
@@ -1020,6 +1180,48 @@ async function saveSaleEdit(data) {
   await syncNow(false);
 }
 
+async function saveBarcode(form) {
+  const account = currentAccount();
+  if (!account) return;
+  const formData = new FormData(form);
+  const barcode = normalizeBarcode({
+    id: randomId(),
+    description: formData.get("description"),
+    startDate: formData.get("startDate"),
+    endDate: formData.get("endDate"),
+    code: formData.get("code"),
+    models: formData.getAll("models"),
+    sizes: formData.getAll("sizes"),
+    createdBy: account.username
+  });
+
+  if (!barcode) {
+    toast("Enter a description, valid dates, a 15 digit code, models, and sizes.");
+    return;
+  }
+  if (barcode.endDate < barcode.startDate) {
+    toast("End date must be after the start date.");
+    return;
+  }
+  if (!barcode.models.length || !barcode.sizes.length) {
+    toast("Choose at least one model and one size.");
+    return;
+  }
+
+  try {
+    const payload = await apiPost("/api/barcodes/save", { ...authPayload(), ...barcode });
+    applyMetaPayload(payload);
+    state.barcodeFormOpen = false;
+    toast("Barcode saved.");
+    render();
+  } catch (error) {
+    mergeBarcodes([barcode]);
+    state.barcodeFormOpen = false;
+    toast(`Saved locally. Backend sync failed: ${error.message}`);
+    render();
+  }
+}
+
 async function deleteSale(id) {
   const sale = state.sales.find((item) => item.id === id);
   if (!sale) return;
@@ -1170,7 +1372,7 @@ async function syncNow(showResult) {
   if (state.syncInProgress) return;
   state.syncInProgress = true;
   try {
-    const payload = await apiPost("/api/sync", { ...authPayload(), sales: state.sales, deletedSaleIds: state.deletedSales });
+    const payload = await apiPost("/api/sync", { ...authPayload(), sales: state.sales, deletedSaleIds: state.deletedSales, barcodes: state.barcodes });
     applyServerPayload(payload);
     if (showResult) toast("Sync complete.");
   } catch (error) {
@@ -1274,12 +1476,53 @@ function applyMetaPayload(meta) {
     state.rateHistory = meta.commissionRateHistory.map(normalizeRateHistory).filter(Boolean);
     writeJson(KEY.rateHistory, state.rateHistory);
   }
+  if (Array.isArray(meta.barcodes)) {
+    state.barcodes = meta.barcodes.map(normalizeBarcode).filter(Boolean);
+    writeJson(KEY.barcodes, state.barcodes);
+  }
   if (meta.modelCategories && typeof meta.modelCategories === "object") {
     state.meta.modelCategories = normalizeModelCategories(meta.modelCategories);
   } else if (!state.meta.modelCategories || typeof state.meta.modelCategories !== "object") {
     state.meta.modelCategories = DEFAULT_MODEL_CATEGORIES;
   }
   writeJson(KEY.meta, state.meta);
+}
+
+function normalizeBarcode(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const code = String(raw.code || "").replace(/\D/g, "");
+  const description = String(raw.description || "").trim();
+  const startDate = validIsoDate(raw.startDate || raw.start_date);
+  const endDate = validIsoDate(raw.endDate || raw.end_date);
+  const models = cleanOptions(raw.models, []);
+  const sizes = cleanOptions(raw.sizes, []);
+  if (!description || code.length !== 15 || !startDate || !endDate) return null;
+  return {
+    id: String(raw.id || randomId()),
+    description,
+    startDate,
+    endDate,
+    code,
+    models: sortedOptions(models),
+    sizes: sortedOptions(sizes),
+    createdBy: String(raw.createdBy || raw.created_by || "")
+  };
+}
+
+function mergeBarcodes(items) {
+  const map = new Map(state.barcodes.map((barcode) => [barcode.id, barcode]));
+  for (const item of items) {
+    const barcode = normalizeBarcode(item);
+    if (barcode) map.set(barcode.id, barcode);
+  }
+  state.barcodes = [...map.values()];
+  writeJson(KEY.barcodes, state.barcodes);
+}
+
+function validIsoDate(value) {
+  const text = String(value || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return "";
+  return parseIsoDate(text) ? text : "";
 }
 
 function appearancePrefs(account = currentAccount()) {
@@ -2226,6 +2469,8 @@ function icon(name) {
     home: "M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z",
     sales: "M5 3h14a1 1 0 0 1 1 1v16l-3-2-3 2-3-2-3 2-3-2-3 2V4a1 1 0 0 1 1-1zm3 5h8V6H8zm0 4h8v-2H8zm0 4h5v-2H8z",
     commission: "M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zm3 2v2h10V8zm0 4v2h3v-2zm5 0v2h5v-2zm-5 4v2h3v-2zm5 0v2h5v-2z",
+    cash: "M4 7h16v10H4zm2 2v6h12V9zm6 5a2 2 0 1 0 0-4 2 2 0 0 0 0 4z",
+    barcode: "M4 5h2v14H4zm3 0h1v14H7zm3 0h2v14h-2zm4 0h1v14h-1zm3 0h3v14h-3z",
     add: "M11 4h2v7h7v2h-7v7h-2v-7H4v-2h7z",
     share: "M18 16.1c-1 0-1.9.4-2.5 1.1l-6.8-4c.1-.4.1-.8 0-1.2l6.8-4c.6.7 1.5 1.1 2.5 1.1a3.1 3.1 0 1 0-3.1-3.1c0 .2 0 .4.1.6l-6.9 4.1a3.1 3.1 0 1 0 0 4.6l6.9 4.1c0 .2-.1.4-.1.6a3.1 3.1 0 1 0 3.1-3.1z"
   };

@@ -186,7 +186,7 @@ button {
 .content::after {
   content: "";
   display: block;
-  height: calc(152px + env(safe-area-inset-bottom));
+  height: calc(178px + env(safe-area-inset-bottom));
 }
 
 .auth-shell {
@@ -471,6 +471,10 @@ h3 {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.seg-row.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .seg {
   height: 32px;
   border-radius: 12px;
@@ -653,6 +657,38 @@ select:disabled {
   border-radius: 26px;
   background: var(--blue);
   color: var(--accent-contrast);
+}
+
+.utility-nav {
+  position: fixed;
+  left: 50%;
+  bottom: calc(18px + env(safe-area-inset-bottom));
+  z-index: 19;
+  width: min(156px, calc(100vw - 210px));
+  min-width: 132px;
+  height: 28px;
+  transform: translateX(-50%);
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  justify-items: center;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 8px;
+  border: 1px solid var(--stroke);
+  border-radius: 999px;
+  background: var(--panel);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.36);
+}
+
+.utility-nav .icon-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+}
+
+.utility-nav .icon-btn svg {
+  width: 14px;
+  height: 14px;
 }
 
 .drawer {
@@ -993,6 +1029,116 @@ select:disabled {
   gap: 8px;
 }
 
+.barcode-form {
+  border-color: color-mix(in srgb, var(--hisense), transparent 28%);
+}
+
+.barcode-date-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.barcode-check-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  max-height: 190px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.barcode-check-grid.sizes {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  max-height: 120px;
+}
+
+.check-pill {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 6px 8px;
+  border: 1px solid var(--field-stroke);
+  border-radius: 10px;
+  background: var(--field);
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.check-pill input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--blue);
+}
+
+.barcode-list-card {
+  display: grid;
+  gap: 10px;
+}
+
+.barcode-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(118px, 148px);
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid rgba(120, 136, 166, 0.24);
+  border-radius: 12px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--hisense), transparent 88%), transparent 56%), var(--field);
+}
+
+.barcode-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.barcode-copy strong,
+.barcode-copy span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.barcode-copy strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.barcode-copy span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.barcode-copy small {
+  color: var(--subtle);
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.barcode-art {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  padding: 6px;
+  border-radius: 10px;
+  background: #fff;
+  color: #111827;
+}
+
+.barcode-svg {
+  width: 100%;
+  height: 44px;
+  fill: currentColor;
+}
+
+.barcode-art span {
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
 .metric-row {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1057,5 +1203,22 @@ select:disabled {
 
   .legend {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .barcode-check-grid,
+  .barcode-date-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .barcode-check-grid.sizes {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .barcode-item {
+    grid-template-columns: 1fr;
+  }
+
+  .barcode-art {
+    max-width: 180px;
   }
 }
