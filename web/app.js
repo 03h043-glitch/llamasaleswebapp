@@ -62,8 +62,8 @@ const BRAND_COLORS = {
   Other: "#cbd5e1"
 };
 const APP_BUILD = {
-  version: "v23",
-  baseCommit: "eebf29d",
+  version: "v25",
+  baseCommit: "ac9da82",
   repo: "03h043-glitch/llamasaleswebapp"
 };
 const DEFAULT_APPEARANCE = { theme: "dark", palette: "default" };
@@ -139,6 +139,7 @@ const state = {
   salesSort: "time",
   editSaleId: "",
   barcodeFormOpen: false,
+  barcodeEditId: "",
   barcodeSort: "model",
   commissionView: "Today",
   selectedPayPeriod: "",
@@ -234,6 +235,15 @@ app.addEventListener("click", async (event) => {
     render();
   } else if (action === "toggle-barcode-form") {
     state.barcodeFormOpen = !state.barcodeFormOpen;
+    state.barcodeEditId = "";
+    render();
+  } else if (action === "edit-barcode") {
+    state.barcodeEditId = value;
+    state.barcodeFormOpen = false;
+    render();
+  } else if (action === "cancel-barcode-form") {
+    state.barcodeEditId = "";
+    state.barcodeFormOpen = false;
     render();
   } else if (action === "toggle-commission-float") {
     state.ui.commissionFloatHidden = !state.ui.commissionFloatHidden;
@@ -270,6 +280,8 @@ app.addEventListener("change", (event) => {
     toggleSaleFields(target.form, target.value === "Hisense");
   } else if (target.matches("[data-sale-type]")) {
     updateHisenseItemType(target.form, target.value);
+  } else if (target.matches("[data-barcode-model]")) {
+    refreshBarcodeCombos(target.form);
   }
 });
 
@@ -745,6 +757,7 @@ function saleTimeLabel(sale) {
 
 function renderBarcodes() {
   const rows = sortedActiveBarcodes();
+  const editBarcode = state.barcodeEditId ? rows.find((barcode) => barcode.id === state.barcodeEditId) || state.barcodes.map(normalizeBarcode).find((barcode) => barcode?.id === state.barcodeEditId) : null;
   return `
     <div class="page-heading-row">
       <div>
@@ -753,7 +766,7 @@ function renderBarcodes() {
       </div>
       <button class="mini-btn" data-action="toggle-barcode-form">${state.barcodeFormOpen ? "Close" : "Add Barcode"}</button>
     </div>
-    ${state.barcodeFormOpen ? renderBarcodeForm() : ""}
+    ${state.barcodeFormOpen || editBarcode ? renderBarcodeForm(editBarcode) : ""}
     <div class="segmented compact-tabs">
       <div class="seg-row three">
         ${buttonSeg("barcode-sort", "model", "Model", state.barcodeSort === "model")}
@@ -767,38 +780,65 @@ function renderBarcodes() {
   `;
 }
 
-function renderBarcodeForm() {
+function renderBarcodeForm(barcode = null) {
   const today = todayIso();
+  const selectedModels = barcode?.models || [];
+  const availableModels = sortedOptions([...new Set([...modelOptions(), ...selectedModels])]);
+  const selectedCombos = new Set((barcode?.appliesTo || []).map((combo) => barcodeComboKey(combo.model, combo.size)));
+  const isEdit = Boolean(barcode);
   return `
     <form class="card stack barcode-form" data-form="barcode">
-      <h3>Add Barcode</h3>
+      <input type="hidden" name="id" value="${esc(barcode?.id || "")}">
+      <input type="hidden" name="createdBy" value="${esc(barcode?.createdBy || currentAccount()?.username || "")}">
+      <input type="hidden" name="createdAt" value="${esc(barcode?.createdAt || "")}">
+      <div class="barcode-form-head">
+        <h3>${isEdit ? "Edit Barcode" : "Add Barcode"}</h3>
+        <button class="mini-btn" type="button" data-action="cancel-barcode-form">Cancel</button>
+      </div>
       <div class="field">
         <label>Offer Description</label>
-        <input name="description" maxlength="90" placeholder="Example: GBP 50 off selected U7Q TVs" required>
+        <input name="description" maxlength="90" value="${esc(barcode?.description || "")}" placeholder="Example: GBP 50 off selected U7Q TVs" required>
       </div>
       <div class="barcode-date-grid">
-        <div class="field"><label>Start Date</label><input name="startDate" type="date" value="${today}" required></div>
-        <div class="field"><label>End Date</label><input name="endDate" type="date" value="${today}" required></div>
+        <div class="field"><label>Start Date</label><input name="startDate" type="date" value="${esc(barcode?.startDate || today)}" required></div>
+        <div class="field"><label>End Date</label><input name="endDate" type="date" value="${esc(barcode?.endDate || today)}" required></div>
       </div>
       <div class="field">
         <label>15 Digit Code</label>
-        <input name="code" inputmode="numeric" pattern="\\d{15}" minlength="15" maxlength="15" placeholder="123456789012345" required>
+        <input name="code" inputmode="numeric" pattern="\\d{15}" minlength="15" maxlength="15" value="${esc(barcode?.code || "")}" placeholder="123456789012345" required>
       </div>
       <div class="field">
         <label>Models Affected</label>
         <div class="barcode-check-grid">
-          ${modelOptions().map((model) => `<label class="check-pill"><input type="checkbox" name="models" value="${esc(model)}"><span>${esc(model)}</span></label>`).join("")}
+          ${availableModels.map((model) => `<label class="check-pill"><input type="checkbox" name="models" data-barcode-model value="${esc(model)}" ${selectedModels.includes(model) ? "checked" : ""}><span>${esc(model)}</span></label>`).join("")}
         </div>
       </div>
       <div class="field">
-        <label>Sizes Affected</label>
-        <div class="barcode-check-grid sizes">
-          ${sizeOptions().map((size) => `<label class="check-pill"><input type="checkbox" name="sizes" value="${esc(size)}"><span>${esc(size)}"</span></label>`).join("")}
+        <label>Model / Size Combos</label>
+        <div class="barcode-combo-grid" data-barcode-combos>
+          ${renderBarcodeComboOptions(selectedModels, selectedCombos)}
         </div>
       </div>
-      <button class="button">Save Barcode</button>
+      <button class="button">${isEdit ? "Save Changes" : "Save Barcode"}</button>
     </form>
   `;
+}
+
+function renderBarcodeComboOptions(models, selectedCombos = new Set()) {
+  if (!models.length) return `<p class="muted combo-empty">Choose models first to show size options.</p>`;
+  const sizes = sizeOptions();
+  return models.map((model) => `
+    <div class="barcode-combo-group">
+      <strong>${esc(model)}</strong>
+      <div class="barcode-size-grid">
+        ${sizes.map((size) => {
+          const checked = selectedCombos.has(barcodeComboKey(model, size));
+          const value = JSON.stringify({ model, size });
+          return `<label class="check-pill compact"><input type="checkbox" name="appliesTo" value="${esc(value)}" ${checked ? "checked" : ""}><span>${esc(size)}"</span></label>`;
+        }).join("")}
+      </div>
+    </div>
+  `).join("");
 }
 
 function barcodeCard(barcode) {
@@ -809,6 +849,7 @@ function barcodeCard(barcode) {
         <strong>${esc(barcode.description || "Barcode offer")}</strong>
         <span>${esc(barcodeModelLabel(barcode))}</span>
         <small>${esc(dates)}</small>
+        <button class="mini-btn barcode-edit-btn" type="button" data-action="edit-barcode" data-value="${esc(barcode.id)}">Edit</button>
       </div>
       <div class="barcode-art">
         ${barcodeSvg(barcode.code)}
@@ -819,9 +860,9 @@ function barcodeCard(barcode) {
 }
 
 function barcodeModelLabel(barcode) {
-  const models = barcode.models?.length ? barcode.models.join(", ") : "All models";
-  const sizes = barcode.sizes?.length ? barcode.sizes.map((size) => `${size}"`).join(", ") : "All sizes";
-  return `${models} | ${sizes}`;
+  const groups = barcodeComboGroups(barcode);
+  if (!groups.length) return "No model/size combos";
+  return groups.map(([model, sizes]) => `${model} ${sizes.map((size) => `${size}"`).join("/")}`).join(" | ");
 }
 
 function barcodeSvg(code) {
@@ -1184,27 +1225,28 @@ async function saveBarcode(form) {
   const account = currentAccount();
   if (!account) return;
   const formData = new FormData(form);
+  const appliesTo = formData.getAll("appliesTo").map(decodeBarcodeCombo).filter(Boolean);
   const barcode = normalizeBarcode({
-    id: randomId(),
+    id: formData.get("id") || randomId(),
     description: formData.get("description"),
     startDate: formData.get("startDate"),
     endDate: formData.get("endDate"),
     code: formData.get("code"),
-    models: formData.getAll("models"),
-    sizes: formData.getAll("sizes"),
-    createdBy: account.username
+    appliesTo,
+    createdBy: formData.get("createdBy") || account.username,
+    createdAt: Number(formData.get("createdAt") || Date.now())
   });
 
   if (!barcode) {
-    toast("Enter a description, valid dates, a 15 digit code, models, and sizes.");
+    toast("Enter a description, valid dates, a 15 digit code, and model/size combos.");
     return;
   }
   if (barcode.endDate < barcode.startDate) {
     toast("End date must be after the start date.");
     return;
   }
-  if (!barcode.models.length || !barcode.sizes.length) {
-    toast("Choose at least one model and one size.");
+  if (!barcode.appliesTo.length) {
+    toast("Choose at least one model/size combo.");
     return;
   }
 
@@ -1212,11 +1254,13 @@ async function saveBarcode(form) {
     const payload = await apiPost("/api/barcodes/save", { ...authPayload(), ...barcode });
     applyMetaPayload(payload);
     state.barcodeFormOpen = false;
+    state.barcodeEditId = "";
     toast("Barcode saved.");
     render();
   } catch (error) {
     mergeBarcodes([barcode]);
     state.barcodeFormOpen = false;
+    state.barcodeEditId = "";
     toast(`Saved locally. Backend sync failed: ${error.message}`);
     render();
   }
@@ -1494,19 +1538,76 @@ function normalizeBarcode(raw) {
   const description = String(raw.description || "").trim();
   const startDate = validIsoDate(raw.startDate || raw.start_date);
   const endDate = validIsoDate(raw.endDate || raw.end_date);
-  const models = cleanOptions(raw.models, []);
-  const sizes = cleanOptions(raw.sizes, []);
-  if (!description || code.length !== 15 || !startDate || !endDate) return null;
+  let appliesTo = normalizeBarcodeCombos(raw.appliesTo || raw.applies_to);
+  if (!appliesTo.length) {
+    const models = cleanOptions(raw.models, []);
+    const sizes = cleanOptions(raw.sizes, []);
+    appliesTo = normalizeBarcodeCombos(models.flatMap((model) => sizes.map((size) => ({ model, size }))));
+  }
+  const models = sortedOptions([...new Set(appliesTo.map((combo) => combo.model))]);
+  const sizes = sortedOptions([...new Set(appliesTo.map((combo) => combo.size))]);
+  if (!description || code.length !== 15 || !startDate || !endDate || !appliesTo.length) return null;
   return {
     id: String(raw.id || randomId()),
     description,
     startDate,
     endDate,
     code,
-    models: sortedOptions(models),
-    sizes: sortedOptions(sizes),
-    createdBy: String(raw.createdBy || raw.created_by || "")
+    appliesTo,
+    models,
+    sizes,
+    createdBy: String(raw.createdBy || raw.created_by || ""),
+    createdAt: Number(raw.createdAt || raw.created_at || Date.now())
   };
+}
+
+function normalizeBarcodeCombos(values) {
+  const output = [];
+  const seen = new Set();
+  let source = values;
+  if (!Array.isArray(source)) {
+    try {
+      const parsed = JSON.parse(String(source || "[]"));
+      source = Array.isArray(parsed) ? parsed : [];
+    } catch {
+      source = [];
+    }
+  }
+  for (const item of source) {
+    const combo = typeof item === "string" ? decodeBarcodeCombo(item) : item;
+    const model = String(combo?.model || "").trim();
+    const size = String(combo?.size || "").trim();
+    const key = barcodeComboKey(model, size);
+    if (model && size && !seen.has(key)) {
+      seen.add(key);
+      output.push({ model, size });
+    }
+  }
+  return output.sort((left, right) => left.model.localeCompare(right.model, undefined, { sensitivity: "base", numeric: true }) || left.size.localeCompare(right.size, undefined, { sensitivity: "base", numeric: true }));
+}
+
+function decodeBarcodeCombo(value) {
+  try {
+    const parsed = JSON.parse(String(value || ""));
+    const model = String(parsed?.model || "").trim();
+    const size = String(parsed?.size || "").trim();
+    return model && size ? { model, size } : null;
+  } catch {
+    return null;
+  }
+}
+
+function barcodeComboKey(model, size) {
+  return `${String(model || "").trim().toLowerCase()}::${String(size || "").trim().toLowerCase()}`;
+}
+
+function barcodeComboGroups(barcode) {
+  const groups = new Map();
+  for (const combo of barcode?.appliesTo || []) {
+    if (!groups.has(combo.model)) groups.set(combo.model, []);
+    groups.get(combo.model).push(combo.size);
+  }
+  return [...groups.entries()].map(([model, sizes]) => [model, sortedOptions([...new Set(sizes)])]);
 }
 
 function mergeBarcodes(items) {
@@ -2421,6 +2522,18 @@ function updateHisenseItemType(form, itemType) {
       if (isSoundbar) size.value = "";
     }
   }
+}
+
+function refreshBarcodeCombos(form) {
+  if (!form) return;
+  const wrap = form.querySelector("[data-barcode-combos]");
+  if (!wrap) return;
+  const selectedModels = [...form.querySelectorAll("[data-barcode-model]:checked")].map((input) => input.value);
+  const selectedCombos = new Set([...wrap.querySelectorAll("input[name='appliesTo']:checked")].map((input) => {
+    const combo = decodeBarcodeCombo(input.value);
+    return combo ? barcodeComboKey(combo.model, combo.size) : "";
+  }).filter(Boolean));
+  wrap.innerHTML = renderBarcodeComboOptions(selectedModels, selectedCombos);
 }
 
 function registerStoreOptions(region) {

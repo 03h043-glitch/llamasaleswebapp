@@ -129,7 +129,7 @@ async function handleApi(request, env, url) {
     const user = await authenticatedUser(db, body);
     if (!user) return json({ ok: false, error: "Not authenticated" }, request, 401);
     const barcode = normalizeBarcodePayload(body, user);
-    if (!barcode) return json({ ok: false, error: "Description, valid dates, 15 digit code, models, and sizes are required" }, request, 400);
+    if (!barcode) return json({ ok: false, error: "Description, valid dates, 15 digit code, and model/size combos are required" }, request, 400);
     await saveBarcode(db, barcode);
     await purgeExpiredBarcodes(db);
     return json(await publicMeta(db), request);
@@ -647,13 +647,15 @@ function normalizeBarcodePayload(raw, user) {
   const code = clean(raw?.code).replace(/\D/g, "");
   const startDate = strictDate(raw?.startDate || raw?.start_date);
   const endDate = strictDate(raw?.endDate || raw?.end_date);
-  const models = uniqueCleanList(raw?.models);
-  const sizes = uniqueCleanList(raw?.sizes);
-  if (!description || code.length !== 15 || !models.length || !sizes.length || endDate < startDate) return null;
-  const appliesTo = [];
-  for (const model of models) {
-    for (const size of sizes) appliesTo.push({ model, size });
+  let appliesTo = normalizeBarcodeCombos(raw?.appliesTo || raw?.applies_to);
+  if (!appliesTo.length) {
+    const models = uniqueCleanList(raw?.models);
+    const sizes = uniqueCleanList(raw?.sizes);
+    appliesTo = normalizeBarcodeCombos(models.flatMap((model) => sizes.map((size) => ({ model, size }))));
   }
+  const models = uniqueCleanList(appliesTo.map((combo) => combo.model));
+  const sizes = uniqueCleanList(appliesTo.map((combo) => combo.size));
+  if (!description || code.length !== 15 || !appliesTo.length || endDate < startDate) return null;
   return {
     id: clean(raw?.id) || crypto.randomUUID(),
     description,
@@ -684,7 +686,7 @@ async function purgeExpiredBarcodes(db) {
 }
 
 function barcodeToClient(row) {
-  const appliesTo = parseJsonArray(row.applies_to);
+  const appliesTo = normalizeBarcodeCombos(parseJsonArray(row.applies_to));
   const models = uniqueCleanList(appliesTo.map((item) => item?.model));
   const sizes = uniqueCleanList(appliesTo.map((item) => item?.size));
   return {
@@ -965,12 +967,46 @@ function uniqueCleanList(values) {
   return output.sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base", numeric: true }));
 }
 
+function normalizeBarcodeCombos(values) {
+  const output = [];
+  const seen = new Set();
+  let source = values;
+  if (!Array.isArray(source)) {
+    try {
+      const parsed = JSON.parse(String(source || "[]"));
+      source = Array.isArray(parsed) ? parsed : [];
+    } catch {
+      source = [];
+    }
+  }
+  for (const item of source) {
+    const parsed = typeof item === "string" ? parseJsonObject(item) : item;
+    const model = clean(parsed?.model);
+    const size = clean(parsed?.size);
+    const key = `${model.toLowerCase()}::${size.toLowerCase()}`;
+    if (model && size && !seen.has(key)) {
+      seen.add(key);
+      output.push({ model, size });
+    }
+  }
+  return output.sort((left, right) => left.model.localeCompare(right.model, undefined, { sensitivity: "base", numeric: true }) || left.size.localeCompare(right.size, undefined, { sensitivity: "base", numeric: true }));
+}
+
 function parseJsonArray(value) {
   try {
     const parsed = JSON.parse(String(value || "[]"));
     return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
+  }
+}
+
+function parseJsonObject(value) {
+  try {
+    const parsed = JSON.parse(String(value || "{}"));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
   }
 }
 
