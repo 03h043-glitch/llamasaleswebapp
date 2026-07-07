@@ -80,7 +80,7 @@ button {
   top: 0;
   z-index: 10;
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
   align-items: center;
   min-height: 64px;

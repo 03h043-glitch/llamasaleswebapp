@@ -62,8 +62,8 @@ const BRAND_COLORS = {
   Other: "#cbd5e1"
 };
 const APP_BUILD = {
-  version: "v26",
-  baseCommit: "0717c33",
+  version: "v27",
+  baseCommit: "403ca6e",
   repo: "03h043-glitch/llamasaleswebapp"
 };
 const DEFAULT_APPEARANCE = { theme: "dark", palette: "default" };
@@ -423,7 +423,6 @@ function renderShell(account) {
   return `
     <main class="app">
       <header class="topbar">
-        <button class="icon-btn menu-disabled" data-action="menu" aria-label="Menu disabled" disabled>${icon("menu")}</button>
         <div class="brand-title">
           <strong>${esc(account.store || "LlamaSales")}</strong>
           <span>${esc(account.region || "")}</span>
