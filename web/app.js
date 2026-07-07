@@ -61,9 +61,45 @@ const BRAND_COLORS = {
   Sony: "#000000",
   Other: "#cbd5e1"
 };
+const SKU_DATA = {
+  A6Q: {
+    43: "643644", 50: "676172", 55: "693866", 65: "739467",
+    75: "694145", 85: "568128", 100: "695150"
+  },
+  E7Q: {
+    43: "643519", 50: "749522", 55: "693686", 65: "739304",
+    75: "519328", 85: "526657", 100: "^ 58\""
+  },
+  "E7Q Pro": {
+    43: "630177", 50: "594655", 55: "680825", 65: "725644",
+    75: "631417", 85: "628973", 100: "577046"
+  },
+  U7Q: {
+    50: "665262", 55: "667972", 65: "715928",
+    75: "856306", 85: "677759", 100: "793145"
+  },
+  "U7Q Pro": {
+    55: "666670", 65: "715214",
+    75: "855179", 85: "859981", 100: "517009"
+  },
+  U8Q: {
+    55: "665955", 65: "702459",
+    75: "850340", 85: "579848", 100: "855845"
+  },
+  PX3: {
+    150: "603437"
+  },
+  C2: {
+    300: "626823"
+  },
+  "C2 Ultra": {
+    300: "617952"
+  }
+};
+const SKU_MODELS = Object.keys(SKU_DATA);
 const APP_BUILD = {
-  version: "v27",
-  baseCommit: "403ca6e",
+  version: "v28",
+  baseCommit: "a14ff7d",
   repo: "03h043-glitch/llamasaleswebapp"
 };
 const DEFAULT_APPEARANCE = { theme: "dark", palette: "default" };
@@ -141,6 +177,8 @@ const state = {
   barcodeFormOpen: false,
   barcodeEditId: "",
   barcodeSort: "model",
+  skuModel: "",
+  skuSize: "",
   commissionView: "Today",
   selectedPayPeriod: "",
   ui: readJson(KEY.ui, { commissionFloatHidden: false, commissionFloatX: null, commissionFloatY: null }),
@@ -230,6 +268,15 @@ app.addEventListener("click", async (event) => {
   } else if (action === "pay-period") {
     state.selectedPayPeriod = value;
     render();
+  } else if (action === "sku-model") {
+    state.skuModel = value;
+    state.skuSize = "";
+    render();
+  } else if (action === "sku-size") {
+    state.skuSize = value;
+    render();
+  } else if (action === "copy-sku") {
+    await copySku();
   } else if (action === "barcode-sort") {
     state.barcodeSort = value || "model";
     render();
@@ -447,6 +494,7 @@ function renderShell(account) {
 
       <nav class="utility-nav">
         <button class="icon-btn ${state.ui.commissionFloatHidden ? "" : "active"}" data-action="toggle-commission-float" aria-label="Toggle daily commission">${icon("cash")}</button>
+        <button class="icon-btn ${state.page === "sku" ? "active" : ""}" data-action="page" data-value="sku" aria-label="SKU lookup">${icon("sku")}</button>
         <button class="icon-btn ${state.page === "barcodes" ? "active" : ""}" data-action="page" data-value="barcodes" aria-label="Barcodes">${icon("barcode")}</button>
       </nav>
 
@@ -462,6 +510,7 @@ function renderPage(account) {
   if (state.page === "add") return renderAddSale(account);
   if (state.page === "todaySales") return renderTodaysSales(account);
   if (state.page === "commission") return renderCommission(account);
+  if (state.page === "sku") return renderSkuLookup();
   if (state.page === "barcodes") return renderBarcodes(account);
   if (state.page === "asm") return renderAsm(account);
   if (state.page === "config") return renderCommissionConfig();
@@ -752,6 +801,52 @@ function saleTimeLabel(sale) {
   const timestamp = Number(sale.createdAt || 0);
   if (!timestamp) return "";
   return new Date(timestamp).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+}
+
+function renderSkuLookup() {
+  const model = state.skuModel;
+  const availableSizes = skuSizesForModel(model);
+  const sku = selectedSku();
+  return `
+    <div class="page-heading-row">
+      <div>
+        <h2>SKU Lookup</h2>
+        <p class="muted">Hisense TV model and size reference</p>
+      </div>
+    </div>
+    <section class="card sku-card stack">
+      <div class="field">
+        <label>Model</label>
+        <div class="sku-grid models">
+          ${SKU_MODELS.map((item) => `<button class="sku-choice ${model === item ? "active" : ""}" data-action="sku-model" data-value="${esc(item)}">${esc(item)}</button>`).join("")}
+        </div>
+      </div>
+      <div class="field">
+        <label>Size</label>
+        ${model ? `
+          <div class="sku-grid sizes">
+            ${availableSizes.map((size) => `<button class="sku-choice ${state.skuSize === size ? "active" : ""}" data-action="sku-size" data-value="${esc(size)}">${esc(size)}"</button>`).join("")}
+          </div>
+        ` : `<p class="muted sku-empty">Choose a model first.</p>`}
+      </div>
+      <div class="sku-result ${sku ? "found" : ""}">
+        ${sku ? `
+          <span>${esc(model)} ${esc(state.skuSize)}"</span>
+          <strong>${esc(sku)}</strong>
+          <button class="mini-btn" data-action="copy-sku">Copy</button>
+        ` : `<span>${model && state.skuSize ? "No SKU available for this combination" : "Select a model and size"}</span>`}
+      </div>
+    </section>
+  `;
+}
+
+function skuSizesForModel(model) {
+  const row = SKU_DATA[model] || {};
+  return Object.keys(row).sort((left, right) => Number(left) - Number(right));
+}
+
+function selectedSku() {
+  return state.skuModel && state.skuSize ? SKU_DATA[state.skuModel]?.[state.skuSize] || "" : "";
 }
 
 function renderBarcodes() {
@@ -1285,6 +1380,17 @@ async function deleteSale(id) {
   toast("Sale deleted locally.");
   render();
   await syncNow(false);
+}
+
+async function copySku() {
+  const sku = selectedSku();
+  if (!sku) return;
+  try {
+    await navigator.clipboard.writeText(sku);
+    toast("SKU copied.");
+  } catch {
+    toast(`SKU: ${sku}`);
+  }
 }
 
 function changeSalesDay(direction) {
@@ -2595,6 +2701,7 @@ function icon(name) {
     sales: "M5 3h14a1 1 0 0 1 1 1v16l-3-2-3 2-3-2-3 2-3-2-3 2V4a1 1 0 0 1 1-1zm3 5h8V6H8zm0 4h8v-2H8zm0 4h5v-2H8z",
     commission: "M4 6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zm3 2v2h10V8zm0 4v2h3v-2zm5 0v2h5v-2zm-5 4v2h3v-2zm5 0v2h5v-2z",
     cash: "M4 7h16v10H4zm2 2v6h12V9zm6 5a2 2 0 1 0 0-4 2 2 0 0 0 0 4z",
+    sku: "M4 6a2 2 0 0 1 2-2h7l7 7v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zm8 0H6v12h12v-6h-6zm2 1.4V10h2.6zM8 13h8v2H8zm0-4h3v2H8z",
     barcode: "M4 5h2v14H4zm3 0h1v14H7zm3 0h2v14h-2zm4 0h1v14h-1zm3 0h3v14h-3z",
     add: "M11 4h2v7h7v2h-7v7h-2v-7H4v-2h7z",
     share: "M18 16.1c-1 0-1.9.4-2.5 1.1l-6.8-4c.1-.4.1-.8 0-1.2l6.8-4c.6.7 1.5 1.1 2.5 1.1a3.1 3.1 0 1 0-3.1-3.1c0 .2 0 .4.1.6l-6.9 4.1a3.1 3.1 0 1 0 0 4.6l6.9 4.1c0 .2-.1.4-.1.6a3.1 3.1 0 1 0 3.1-3.1z"

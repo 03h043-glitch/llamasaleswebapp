@@ -669,7 +669,7 @@ select:disabled {
   height: 38px;
   transform: translateX(-50%);
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   justify-items: center;
   align-items: center;
   gap: 12px;
@@ -694,6 +694,82 @@ select:disabled {
   display: block;
   width: 18px;
   height: 18px;
+}
+
+.sku-card {
+  border-color: color-mix(in srgb, var(--blue), transparent 25%);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--blue), transparent 88%), var(--card));
+}
+
+.sku-grid {
+  display: grid;
+  gap: 7px;
+}
+
+.sku-grid.models {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.sku-grid.sizes {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.sku-choice {
+  min-height: 38px;
+  border-radius: 11px;
+  border: 1px solid var(--field-stroke);
+  background: var(--field);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.sku-choice.active {
+  border-color: transparent;
+  background: var(--blue);
+  color: var(--accent-contrast);
+}
+
+.sku-empty {
+  margin: 0;
+  padding: 10px;
+  border: 1px dashed var(--field-stroke);
+  border-radius: 12px;
+}
+
+.sku-result {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-height: 78px;
+  padding: 12px;
+  border: 1px solid var(--field-stroke);
+  border-radius: 14px;
+  background: var(--field);
+}
+
+.sku-result span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.sku-result strong {
+  grid-column: 1 / -1;
+  color: var(--blue);
+  font-size: 34px;
+  line-height: 1;
+  letter-spacing: 2px;
+}
+
+.sku-result .mini-btn {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.sku-result.found {
+  border-color: color-mix(in srgb, var(--blue), transparent 15%);
 }
 
 .drawer {
@@ -1297,6 +1373,14 @@ select:disabled {
 
   .legend {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sku-grid.models {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sku-grid.sizes {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
   .barcode-check-grid,
