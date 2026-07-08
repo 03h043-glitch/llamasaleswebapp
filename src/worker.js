@@ -206,6 +206,10 @@ async function handleAdmin(request, env, url) {
     await adminResetUserPassword(request, db);
     return redirect("/admin");
   }
+  if (request.method === "POST" && url.pathname === "/admin/users/repair") {
+    await adminRepairUserFromSales(request, db);
+    return redirect("/admin");
+  }
   if (request.method === "POST" && url.pathname === "/admin/users/delete") {
     const form = await request.formData();
     await db.prepare("DELETE FROM users WHERE username=?").bind(clean(form.get("username"))).run();
@@ -257,6 +261,10 @@ async function handleAdmin(request, env, url) {
     await adminBatchSaveSkus(request, db);
     return redirect("/admin#sku-matrix");
   }
+  if (request.method === "POST" && url.pathname === "/admin/import/legacy") {
+    await adminImportLegacyBackup(request, db);
+    return redirect("/admin?imported=1");
+  }
   if (request.method === "GET" && url.pathname === "/backup") {
     const backup = await buildBackup(db);
     return new Response(JSON.stringify(backup, null, 2), {
@@ -267,7 +275,7 @@ async function handleAdmin(request, env, url) {
     });
   }
 
-  return html(await adminHome(db), request);
+  return html(await adminHome(db, url.searchParams.get("imported") === "1"), request);
 }
 
 async function adminSaveUser(request, db) {
@@ -290,6 +298,62 @@ async function adminResetUserPassword(request, db) {
   const username = clean(form.get("username"));
   if (!username) return;
   await db.prepare("UPDATE users SET password_hash=? WHERE username=?").bind(await sha256(DEFAULT_RESET_PASSWORD), username).run();
+}
+
+async function adminRepairUserFromSales(request, db) {
+  const form = await request.formData();
+  const username = clean(form.get("username"));
+  const email = clean(form.get("email"));
+  const region = canonicalRegion(form.get("region"));
+  const store = clean(form.get("store"));
+  if (!username || !email || !region || !store) return;
+  await db.prepare("INSERT INTO users (username,password_hash,email,region,store,created_at) VALUES (?,?,?,?,?,?) ON CONFLICT(username) DO UPDATE SET email=excluded.email, region=excluded.region, store=excluded.store")
+    .bind(username, await sha256(DEFAULT_RESET_PASSWORD), email, region, store, Date.now()).run();
+}
+
+async function adminImportLegacyBackup(request, db) {
+  const form = await request.formData();
+  const backupText = String(form.get("backupJson") || "").trim();
+  if (!backupText) return;
+
+  let backup = null;
+  try {
+    backup = JSON.parse(backupText);
+  } catch {
+    return;
+  }
+
+  const users = Array.isArray(backup.Users) ? backup.Users : Array.isArray(backup.users) ? backup.users : [];
+  for (const rawUser of users) {
+    if (!rawUser || typeof rawUser !== "object") continue;
+    const username = clean(rawUser.Username || rawUser.username);
+    const passwordHash = clean(rawUser.PasswordHash || rawUser.passwordHash || rawUser.password_hash).toLowerCase();
+    const email = clean(rawUser.Email || rawUser.email);
+    const region = canonicalRegion(rawUser.Region || rawUser.region);
+    const store = clean(rawUser.Store || rawUser.store);
+    if (!username || !passwordHash || !email || !region || !store) continue;
+    await db.prepare("INSERT INTO users (username,password_hash,email,region,store,created_at) VALUES (?,?,?,?,?,?) ON CONFLICT(username) DO UPDATE SET password_hash=excluded.password_hash, email=excluded.email, region=excluded.region, store=excluded.store")
+      .bind(username, passwordHash, email, region, store, Number(rawUser.CreatedAt || rawUser.createdAt || Date.now())).run();
+  }
+
+  const sales = Array.isArray(backup.Sales) ? backup.Sales : Array.isArray(backup.sales) ? backup.sales : [];
+  for (const rawSale of sales) {
+    if (!rawSale || typeof rawSale !== "object") continue;
+    const sale = legacySaleToDb(rawSale);
+    if (!sale) continue;
+    await upsertSale(db, sale);
+  }
+
+  const commissionRates = backup.CommissionRates && typeof backup.CommissionRates === "object" ? backup.CommissionRates : backup.commissionRates;
+  if (commissionRates && typeof commissionRates === "object") {
+    for (const [key, value] of Object.entries(commissionRates)) {
+      const [model, size] = String(key).split("|");
+      const cleanModel = clean(model);
+      const cleanSize = clean(size);
+      if (!cleanModel || !cleanSize) continue;
+      await saveCommissionRate(db, "tv", cleanModel, cleanSize, Number(value || 0), "1970-01-01", false, "legacy-import");
+    }
+  }
 }
 
 async function adminBatchSaveRates(request, db, datedOnly) {
@@ -370,8 +434,9 @@ function parseCombo(value) {
   }
 }
 
-async function adminHome(db) {
+async function adminHome(db, imported = false) {
   const users = await all(db, "SELECT * FROM users ORDER BY username");
+  const missingUsers = await salesUsersWithoutAccounts(db, users);
   const sales = await all(db, "SELECT * FROM sales ORDER BY date DESC, created_at DESC LIMIT 100");
   const tvModels = await modelList(db, "tv");
   const soundbarModels = await modelList(db, "soundbar");
@@ -398,7 +463,9 @@ async function adminHome(db) {
       ${kpi("Hisense SOV", `${share}%`, "share of TV value")}
       ${kpi("Sales Value", money(totalRevenue), "all brands")}
     </div>
-    ${usersSection(users)}
+    ${imported ? `<p class="notice">Legacy backup import completed. Any valid users, sales, and commission rates in the pasted backup were merged into D1.</p>` : ""}
+    ${usersSection(users, missingUsers)}
+    ${legacyImportSection()}
     ${matrixSection("TV Commission Matrix", "tv", tvModels, sizes, rates, modelCategories)}
     ${soundbarSection(soundbarModels, rates)}
     <section class="card">
@@ -411,10 +478,26 @@ async function adminHome(db) {
   `);
 }
 
-function usersSection(users) {
+async function salesUsersWithoutAccounts(db, users) {
+  const known = new Set(users.map((user) => clean(user.username).toLowerCase()).filter(Boolean));
+  const rows = await all(db, "SELECT username, region, store, MIN(created_at) created_at, COUNT(*) sales_count FROM sales WHERE trim(username) <> '' GROUP BY lower(username) ORDER BY lower(username)");
+  return rows
+    .map((row) => ({
+      username: clean(row.username),
+      email: "",
+      region: canonicalRegion(row.region),
+      store: clean(row.store),
+      created_at: Number(row.created_at || 0),
+      sales_count: Number(row.sales_count || 0)
+    }))
+    .filter((row) => row.username && !known.has(row.username.toLowerCase()));
+}
+
+function usersSection(users, missingUsers = []) {
   return `
     <section class="card">
       <h2>Manage Users</h2>
+      ${missingUsers.length ? `<p class="notice">Some sales are attached to usernames that do not have backend account records yet. Add an email, then repair the account to make it manageable below.</p>` : ""}
       <form method="post" action="/admin/users/save" class="row createUserRow">
         <div><label>Username</label><input name="username" required></div>
         <div><label>Email</label><input name="email" type="email" required></div>
@@ -441,7 +524,33 @@ function usersSection(users) {
             </span>
           </form>
         `).join("")}
+        ${missingUsers.map((user) => `
+          <form method="post" action="/admin/users/repair" class="userTableRow saleOnlyUser" role="row">
+            <input name="username" value="${attr(user.username)}" readonly>
+            <input name="email" type="email" placeholder="email required" required>
+            <select name="region" required>${options(REGIONS, user.region)}</select>
+            <input name="store" value="${attr(user.store)}" required>
+            <span class="createdAt">${escapeHtml(user.sales_count)} sale${user.sales_count === 1 ? "" : "s"}</span>
+            <span class="userActions">
+              <button>Create account</button>
+              <span class="pill">password ${escapeHtml(DEFAULT_RESET_PASSWORD)}</span>
+            </span>
+          </form>
+        `).join("")}
       </div>
+    </section>
+  `;
+}
+
+function legacyImportSection() {
+  return `
+    <section class="card">
+      <h2>Import Legacy Laptop Backup</h2>
+      <p class="muted">Paste the contents of the old <code>llamasales-backend-data.json</code> file here to merge its users, sales, and simple commission rates into Cloudflare D1. Existing matching rows are updated, not duplicated.</p>
+      <form method="post" action="/admin/import/legacy" class="stackForm">
+        <textarea name="backupJson" rows="6" placeholder="{ &quot;Users&quot;: [...], &quot;Sales&quot;: [...] }"></textarea>
+        <div class="actions matrixActions"><button>Import Backup JSON</button></div>
+      </form>
     </section>
   `;
 }
@@ -586,7 +695,7 @@ function page(title, body) {
 }
 
 function adminCss() {
-  return "body{margin:0;background:#05030a;color:#f8fafc;font-family:Segoe UI,Arial,sans-serif}main{max-width:1180px;margin:0 auto;padding:28px 18px 60px}h1{margin:0 0 4px;font-size:34px}h2{margin:0 0 14px;font-size:20px}.muted{color:#9dabc0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}.card{background:rgba(24,27,34,.82);border:1px solid rgba(114,126,166,.65);border-radius:14px;padding:16px;margin:14px 0}.auth{max-width:430px;margin:54px auto}.kpi{font-size:32px;font-weight:800;color:#00aaa6}label{display:block;font-size:12px;color:#9dabc0;margin:10px 0 4px}input,select{box-sizing:border-box;width:100%;height:38px;border-radius:10px;border:1px solid rgba(120,136,166,.7);background:#0b0d11;color:#fff;padding:0 10px}button,.buttonLink{display:inline-flex;align-items:center;justify-content:center;min-height:38px;border:0;border-radius:10px;background:#00aaa6;color:#fff;font-weight:700;padding:0 14px;cursor:pointer;text-decoration:none}.ghost{background:rgba(120,136,166,.16);border:1px solid rgba(120,136,166,.42);color:#dbeafe}.danger{background:#b21c2d}.row{display:grid;grid-template-columns:1.2fr 1.4fr 1fr 1fr auto;gap:8px;align-items:end}.createUserRow{grid-template-columns:1fr 1.4fr 1fr 1fr 1fr auto}.table{width:100%;border-collapse:collapse}.table th,.table td{border-bottom:1px solid rgba(120,136,166,.35);padding:8px;text-align:left;font-size:13px}.pill{display:inline-block;border:1px solid rgba(0,170,166,.6);border-radius:999px;padding:4px 8px;color:#00aaa6;font-size:12px}.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.error{color:#ff8b8b;font-weight:700}.notice{color:#7df2c7;font-weight:700}.userTable{display:grid;gap:4px;margin-top:14px;overflow:auto}.userTableHead,.userTableRow{display:grid;grid-template-columns:1fr 1.5fr 1fr 1fr .8fr 2fr;gap:6px;align-items:center;min-width:1040px}.userTableHead{color:#9dabc0;font-size:12px;font-weight:800;padding:0 8px}.userTableRow{padding:8px;border-top:1px solid rgba(120,136,166,.28);background:rgba(11,13,17,.32);border-radius:10px}.createdAt{color:#dbeafe;font-size:13px}.userActions{display:flex;gap:6px;flex-wrap:wrap}.userActions button{min-height:32px;padding:0 10px;font-size:12px}.matrixTools{display:grid;grid-template-columns:repeat(2,minmax(180px,1fr));gap:10px;margin:10px 0 14px}.modelDeleteList{display:grid;gap:8px;margin:0 0 12px}.modelChipGrid{display:flex;flex-wrap:wrap;gap:6px}.modelChip{display:inline-flex;align-items:center;gap:6px;min-height:30px;border:1px solid rgba(120,136,166,.3);border-radius:999px;background:rgba(11,13,17,.42);padding:3px 3px 3px 9px}.modelChip span{font-size:12px;color:#dbeafe}.modelChip button{min-height:24px;border-radius:999px;padding:0 8px;font-size:11px}.inlineForm{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}.stackForm{display:grid;gap:12px}.matrixActions{justify-content:flex-end;margin:4px 0}.datedHeader{display:grid;grid-template-columns:minmax(180px,260px) auto;gap:10px;align-items:end;margin:10px 0 14px}.matrixWrap{overflow:auto;border:1px solid rgba(120,136,166,.35);border-radius:12px}.matrix{width:100%;border-collapse:separate;border-spacing:0;min-width:900px}.soundbarMatrix{min-width:420px}.matrix th,.matrix td{border-bottom:1px solid rgba(120,136,166,.28);border-right:1px solid rgba(120,136,166,.2);padding:7px;text-align:left;font-size:12px}.matrix th{position:sticky;top:0;background:#10131a;z-index:1;color:#dbeafe}.matrix th:first-child{left:0;z-index:2}.matrix tbody th{top:auto;left:0;background:#10131a}.categoryCell{min-width:132px}.categoryCell select,.matrixInput{height:32px;padding:0 8px}.matrixInput{min-width:74px}@media(max-width:980px){.userTableHead,.userTableRow{min-width:980px}.matrixTools{grid-template-columns:1fr}}@media(max-width:760px){.row,.createUserRow,.datedHeader{grid-template-columns:1fr}.table{display:block;overflow:auto}}";
+  return "body{margin:0;background:#05030a;color:#f8fafc;font-family:Segoe UI,Arial,sans-serif}main{max-width:1180px;margin:0 auto;padding:28px 18px 60px}h1{margin:0 0 4px;font-size:34px}h2{margin:0 0 14px;font-size:20px}.muted{color:#9dabc0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}.card{background:rgba(24,27,34,.82);border:1px solid rgba(114,126,166,.65);border-radius:14px;padding:16px;margin:14px 0}.auth{max-width:430px;margin:54px auto}.kpi{font-size:32px;font-weight:800;color:#00aaa6}label{display:block;font-size:12px;color:#9dabc0;margin:10px 0 4px}input,select,textarea{box-sizing:border-box;width:100%;border-radius:10px;border:1px solid rgba(120,136,166,.7);background:#0b0d11;color:#fff;padding:0 10px}input,select{height:38px}textarea{min-height:140px;padding:10px;resize:vertical;font-family:Consolas,monospace;font-size:12px}code{color:#dbeafe}.saleOnlyUser{outline:1px solid rgba(125,242,199,.35)}button,.buttonLink{display:inline-flex;align-items:center;justify-content:center;min-height:38px;border:0;border-radius:10px;background:#00aaa6;color:#fff;font-weight:700;padding:0 14px;cursor:pointer;text-decoration:none}.ghost{background:rgba(120,136,166,.16);border:1px solid rgba(120,136,166,.42);color:#dbeafe}.danger{background:#b21c2d}.row{display:grid;grid-template-columns:1.2fr 1.4fr 1fr 1fr auto;gap:8px;align-items:end}.createUserRow{grid-template-columns:1fr 1.4fr 1fr 1fr 1fr auto}.table{width:100%;border-collapse:collapse}.table th,.table td{border-bottom:1px solid rgba(120,136,166,.35);padding:8px;text-align:left;font-size:13px}.pill{display:inline-block;border:1px solid rgba(0,170,166,.6);border-radius:999px;padding:4px 8px;color:#00aaa6;font-size:12px}.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.error{color:#ff8b8b;font-weight:700}.notice{color:#7df2c7;font-weight:700}.userTable{display:grid;gap:4px;margin-top:14px;overflow:auto}.userTableHead,.userTableRow{display:grid;grid-template-columns:1fr 1.5fr 1fr 1fr .8fr 2fr;gap:6px;align-items:center;min-width:1040px}.userTableHead{color:#9dabc0;font-size:12px;font-weight:800;padding:0 8px}.userTableRow{padding:8px;border-top:1px solid rgba(120,136,166,.28);background:rgba(11,13,17,.32);border-radius:10px}.createdAt{color:#dbeafe;font-size:13px}.userActions{display:flex;gap:6px;flex-wrap:wrap}.userActions button{min-height:32px;padding:0 10px;font-size:12px}.matrixTools{display:grid;grid-template-columns:repeat(2,minmax(180px,1fr));gap:10px;margin:10px 0 14px}.modelDeleteList{display:grid;gap:8px;margin:0 0 12px}.modelChipGrid{display:flex;flex-wrap:wrap;gap:6px}.modelChip{display:inline-flex;align-items:center;gap:6px;min-height:30px;border:1px solid rgba(120,136,166,.3);border-radius:999px;background:rgba(11,13,17,.42);padding:3px 3px 3px 9px}.modelChip span{font-size:12px;color:#dbeafe}.modelChip button{min-height:24px;border-radius:999px;padding:0 8px;font-size:11px}.inlineForm{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}.stackForm{display:grid;gap:12px}.matrixActions{justify-content:flex-end;margin:4px 0}.datedHeader{display:grid;grid-template-columns:minmax(180px,260px) auto;gap:10px;align-items:end;margin:10px 0 14px}.matrixWrap{overflow:auto;border:1px solid rgba(120,136,166,.35);border-radius:12px}.matrix{width:100%;border-collapse:separate;border-spacing:0;min-width:900px}.soundbarMatrix{min-width:420px}.matrix th,.matrix td{border-bottom:1px solid rgba(120,136,166,.28);border-right:1px solid rgba(120,136,166,.2);padding:7px;text-align:left;font-size:12px}.matrix th{position:sticky;top:0;background:#10131a;z-index:1;color:#dbeafe}.matrix th:first-child{left:0;z-index:2}.matrix tbody th{top:auto;left:0;background:#10131a}.categoryCell{min-width:132px}.categoryCell select,.matrixInput{height:32px;padding:0 8px}.matrixInput{min-width:74px}@media(max-width:980px){.userTableHead,.userTableRow{min-width:980px}.matrixTools{grid-template-columns:1fr}}@media(max-width:760px){.row,.createUserRow,.datedHeader{grid-template-columns:1fr}.table{display:block;overflow:auto}}";
 }
 
 async function clientPayload(db, user) {
@@ -698,6 +807,30 @@ function normalizeSale(raw, user) {
     region: user.region,
     store: user.store,
     createdAt: Number(raw?.createdAt || Date.now())
+  };
+}
+
+function legacySaleToDb(raw) {
+  const brand = clean(raw?.Brand || raw?.brand);
+  const username = clean(raw?.Username || raw?.username);
+  const region = canonicalRegion(raw?.Region || raw?.region);
+  const store = clean(raw?.Store || raw?.store);
+  const itemTypeValue = clean(raw?.ItemType || raw?.itemType || raw?.item_type).toLowerCase();
+  const itemType = brand === "Hisense" && itemTypeValue === "soundbar" ? "soundbar" : "tv";
+  const date = strictDate(raw?.Date || raw?.date) || todayIso();
+  if (!brand || !username || !region || !store) return null;
+  return {
+    id: clean(raw?.Id || raw?.id) || crypto.randomUUID(),
+    date,
+    brand,
+    itemType,
+    model: brand === "Hisense" ? clean(raw?.Model || raw?.model) : "",
+    size: brand === "Hisense" && itemType === "tv" ? clean(raw?.Size || raw?.size) : "",
+    price: Number(raw?.Price || raw?.price || 0),
+    username,
+    region,
+    store,
+    createdAt: Number(raw?.CreatedAt || raw?.createdAt || raw?.created_at || Date.now())
   };
 }
 
