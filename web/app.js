@@ -97,8 +97,8 @@ const SKU_DATA = {
   }
 };
 const APP_BUILD = {
-  version: "v31",
-  baseCommit: "234bc4a",
+  version: "v32",
+  baseCommit: "276ff34",
   repo: "03h043-glitch/llamasaleswebapp"
 };
 const DEFAULT_APPEARANCE = { theme: "dark", palette: "default" };
@@ -2161,8 +2161,6 @@ async function shareDashboard() {
   try {
     const file = await dashboardImageFile(account);
     const sharePayload = {
-      title: "LlamaSales dashboard",
-      text: "LlamaSales dashboard",
       files: [file]
     };
     if (navigator.share && (!navigator.canShare || navigator.canShare(sharePayload))) {
