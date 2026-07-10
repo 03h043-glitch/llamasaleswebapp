@@ -97,8 +97,8 @@ const SKU_DATA = {
   }
 };
 const APP_BUILD = {
-  version: "v30",
-  baseCommit: "027e081",
+  version: "v31",
+  baseCommit: "234bc4a",
   repo: "03h043-glitch/llamasaleswebapp"
 };
 const DEFAULT_APPEARANCE = { theme: "dark", palette: "default" };
@@ -326,6 +326,8 @@ app.addEventListener("change", (event) => {
     toggleSaleFields(target.form, target.value === "Hisense");
   } else if (target.matches("[data-sale-type]")) {
     updateHisenseItemType(target.form, target.value);
+  } else if (target.matches("[data-sale-refund]")) {
+    toggleSaleFields(target.form, target.form?.elements.brand?.value === "Hisense");
   } else if (target.matches("[data-barcode-model]")) {
     refreshBarcodeCombos(target.form);
   }
@@ -677,7 +679,7 @@ function renderAddSale(account) {
         <input name="price" inputmode="decimal" placeholder="Example: 799" required>
       </div>
       <label class="check-row">
-        <input type="checkbox" name="refund" value="1">
+        <input type="checkbox" name="refund" value="1" data-sale-refund>
         <span>Mark as refund</span>
       </label>
       <button class="button">Complete Sale</button>
@@ -764,8 +766,10 @@ function saleEditRow(sale) {
 
 function saleEditForm(sale) {
   const isHisense = sale.brand === "Hisense";
+  const isRefund = saleIsRefund(sale);
   const isSoundbar = saleItemType(sale) === "soundbar";
   const modelValues = isSoundbar ? soundbarModelOptions() : modelOptions();
+  const showHisenseDetails = isHisense && !isRefund;
   return `
     <form class="sale-edit" data-form="sale-edit">
       <input type="hidden" name="id" value="${esc(sale.id)}">
@@ -776,11 +780,11 @@ function saleEditForm(sale) {
       <div class="sale-edit-grid">
         <div class="field"><label>Date</label><input name="date" type="date" value="${esc(sale.date)}" required></div>
         <div class="field"><label>Brand</label><select name="brand" data-sale-brand>${options(BRANDS, sale.brand)}</select></div>
-        <div class="field" data-hisense-sale-field ${isHisense ? "" : "hidden"}><label>Type</label><select name="itemType" data-sale-type><option value="tv" ${!isSoundbar ? "selected" : ""}>TV</option><option value="soundbar" ${isSoundbar ? "selected" : ""}>Soundbar</option></select></div>
-        <div class="field" data-hisense-sale-field ${isHisense ? "" : "hidden"}><label>Model</label><select name="model" data-sale-model>${options(modelValues, isHisense ? sale.model : "")}</select></div>
-        <div class="field" data-hisense-sale-field data-tv-only ${isHisense && !isSoundbar ? "" : "hidden"}><label>Size</label><select name="size">${options(sizeOptions(), isHisense && !isSoundbar ? sale.size : "")}</select></div>
+        <div class="field" data-hisense-sale-field ${showHisenseDetails ? "" : "hidden"}><label>Type</label><select name="itemType" data-sale-type><option value="tv" ${!isSoundbar ? "selected" : ""}>TV</option><option value="soundbar" ${isSoundbar ? "selected" : ""}>Soundbar</option></select></div>
+        <div class="field" data-hisense-sale-field ${showHisenseDetails ? "" : "hidden"}><label>Model</label><select name="model" data-sale-model>${options(modelValues, showHisenseDetails ? sale.model : "")}</select></div>
+        <div class="field" data-hisense-sale-field data-tv-only ${showHisenseDetails && !isSoundbar ? "" : "hidden"}><label>Size</label><select name="size">${options(sizeOptions(), showHisenseDetails && !isSoundbar ? sale.size : "")}</select></div>
         <div class="field"><label>Value</label><input name="price" inputmode="decimal" value="${esc(sale.price)}" required></div>
-        <label class="check-row inline-check"><input type="checkbox" name="refund" value="1" ${saleIsRefund(sale) ? "checked" : ""}><span>Refund</span></label>
+        <label class="check-row inline-check"><input type="checkbox" name="refund" value="1" data-sale-refund ${isRefund ? "checked" : ""}><span>Refund</span></label>
       </div>
       <div class="row-actions">
         <button class="button secondary">Save</button>
@@ -1282,12 +1286,13 @@ async function saveSale(data) {
     return;
   }
   const isHisense = brand === "Hisense";
-  const itemType = isHisense && data.itemType === "soundbar" ? "soundbar" : "tv";
-  if (isHisense && !data.model) {
+  const refund = data.refund === "1";
+  const itemType = isHisense && !refund && data.itemType === "soundbar" ? "soundbar" : "tv";
+  if (isHisense && !refund && !data.model) {
     toast("Choose the Hisense model.");
     return;
   }
-  if (isHisense && itemType === "tv" && !data.size) {
+  if (isHisense && !refund && itemType === "tv" && !data.size) {
     toast("Choose the Hisense model and screen size.");
     return;
   }
@@ -1296,12 +1301,12 @@ async function saveSale(data) {
     date: todayIso(),
     brand,
     itemType,
-    model: isHisense ? data.model || "" : "",
-    size: isHisense && itemType === "tv" ? data.size || "" : "",
+    model: isHisense && !refund ? data.model || "" : "",
+    size: isHisense && !refund && itemType === "tv" ? data.size || "" : "",
     price,
-    refund: data.refund === "1",
-    soundbarUnits: isHisense && itemType === "soundbar" ? 1 : 0,
-    soundbarRevenue: isHisense && itemType === "soundbar" ? price : 0,
+    refund,
+    soundbarUnits: isHisense && !refund && itemType === "soundbar" ? 1 : 0,
+    soundbarRevenue: isHisense && !refund && itemType === "soundbar" ? price : 0,
     username: account.username,
     region: account.region,
     store: account.store,
@@ -1320,17 +1325,18 @@ async function saveSaleEdit(data) {
   const sale = state.sales.find((item) => item.id === data.id);
   if (!account || !sale) return;
   const brand = String(data.brand || "").trim();
-  const itemType = brand === "Hisense" && data.itemType === "soundbar" ? "soundbar" : "tv";
+  const refund = data.refund === "1";
+  const itemType = brand === "Hisense" && !refund && data.itemType === "soundbar" ? "soundbar" : "tv";
   const price = Number(data.price || 0);
   if (!brand || !price) {
     toast("Choose a brand and enter a valid value.");
     return;
   }
-  if (brand === "Hisense" && !String(data.model || "").trim()) {
+  if (brand === "Hisense" && !refund && !String(data.model || "").trim()) {
     toast("Choose a Hisense model.");
     return;
   }
-  if (brand === "Hisense" && itemType === "tv" && !String(data.size || "").trim()) {
+  if (brand === "Hisense" && !refund && itemType === "tv" && !String(data.size || "").trim()) {
     toast("Choose a TV size.");
     return;
   }
@@ -1339,12 +1345,12 @@ async function saveSaleEdit(data) {
     date: String(data.date || sale.date || todayIso()),
     brand,
     itemType,
-    model: brand === "Hisense" ? String(data.model || "").trim() : "",
-    size: brand === "Hisense" && itemType === "tv" ? String(data.size || "").trim() : "",
+    model: brand === "Hisense" && !refund ? String(data.model || "").trim() : "",
+    size: brand === "Hisense" && !refund && itemType === "tv" ? String(data.size || "").trim() : "",
     price,
-    refund: data.refund === "1",
-    soundbarUnits: brand === "Hisense" && itemType === "soundbar" ? 1 : 0,
-    soundbarRevenue: brand === "Hisense" && itemType === "soundbar" ? price : 0,
+    refund,
+    soundbarUnits: brand === "Hisense" && !refund && itemType === "soundbar" ? 1 : 0,
+    soundbarRevenue: brand === "Hisense" && !refund && itemType === "soundbar" ? price : 0,
     username: account.username,
     region: account.region,
     store: account.store
@@ -2698,14 +2704,16 @@ function toggleNewStoreField(form, show) {
 
 function toggleSaleFields(form, showHisense) {
   if (!form) return;
+  const refund = form.elements.refund?.checked === true;
+  const showHisenseDetails = showHisense && !refund;
   form.querySelectorAll("[data-hisense-sale-field]").forEach((field) => {
-    field.hidden = !showHisense;
+    field.hidden = !showHisenseDetails;
     field.querySelectorAll("input, select").forEach((input) => {
-      input.required = showHisense && input.name === "model";
-      if (!showHisense) input.value = "";
+      input.required = showHisenseDetails && input.name === "model";
+      if (!showHisenseDetails) input.value = "";
     });
   });
-  if (showHisense) {
+  if (showHisenseDetails) {
     if (form.elements.itemType) form.elements.itemType.value = form.elements.itemType.value || "tv";
     updateHisenseItemType(form, form.elements.itemType?.value || "tv");
   }
@@ -2713,6 +2721,10 @@ function toggleSaleFields(form, showHisense) {
 
 function updateHisenseItemType(form, itemType) {
   if (!form) return;
+  if (form.elements.refund?.checked) {
+    toggleSaleFields(form, form.elements.brand?.value === "Hisense");
+    return;
+  }
   const isSoundbar = itemType === "soundbar";
   const model = form.querySelector("[data-sale-model]");
   const sizeWrap = form.querySelector("[data-tv-only]");
