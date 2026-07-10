@@ -186,7 +186,7 @@ button {
 .content::after {
   content: "";
   display: block;
-  height: calc(188px + env(safe-area-inset-bottom));
+  height: calc(198px + env(safe-area-inset-bottom));
 }
 
 .auth-shell {
@@ -557,6 +557,13 @@ select {
   outline: none;
 }
 
+input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  accent-color: var(--hisense);
+}
+
 input:focus,
 select:focus {
   border-color: var(--blue);
@@ -584,6 +591,21 @@ select:disabled {
 
 .button.danger {
   background: var(--blood);
+}
+
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 34px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.inline-check {
+  align-self: end;
+  min-height: 48px;
 }
 
 .choice-grid {
@@ -662,18 +684,18 @@ select:disabled {
 .utility-nav {
   position: fixed;
   left: 50%;
-  bottom: calc(18px + env(safe-area-inset-bottom));
+  bottom: calc(6px + env(safe-area-inset-bottom));
   z-index: 19;
-  width: min(208px, calc(100vw - 176px));
-  min-width: 176px;
-  height: 38px;
+  width: min(196px, calc(100vw - 188px));
+  min-width: 164px;
+  height: 34px;
   transform: translateX(-50%);
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   justify-items: center;
   align-items: center;
   gap: 12px;
-  padding: 4px 10px;
+  padding: 3px 9px;
   border: 1px solid var(--stroke);
   border-radius: 999px;
   background: var(--panel);
@@ -681,8 +703,8 @@ select:disabled {
 }
 
 .utility-nav .icon-btn {
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   border-radius: 999px;
   padding: 0;
   place-self: center;
@@ -692,8 +714,8 @@ select:disabled {
 
 .utility-nav .icon-btn svg {
   display: block;
-  width: 18px;
-  height: 18px;
+  width: 17px;
+  height: 17px;
 }
 
 .sku-card {
@@ -1027,6 +1049,13 @@ select:disabled {
     rgba(11, 13, 17, 0.36);
 }
 
+.sale-table-item.refund-sale {
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--blood), transparent 86%), transparent 60%),
+    linear-gradient(90deg, color-mix(in srgb, var(--brand), transparent 90%), transparent 58%),
+    rgba(11, 13, 17, 0.36);
+}
+
 .sale-table-item:first-of-type {
   border-top: 0;
 }
@@ -1073,6 +1102,10 @@ select:disabled {
   color: var(--hisense);
   font-size: 12px;
   font-weight: 900;
+}
+
+.refund-sale .price-cell {
+  color: var(--blood);
 }
 
 .sale-row-actions {

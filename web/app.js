@@ -97,8 +97,8 @@ const SKU_DATA = {
   }
 };
 const APP_BUILD = {
-  version: "v29",
-  baseCommit: "a507cf8",
+  version: "v30",
+  baseCommit: "027e081",
   repo: "03h043-glitch/llamasaleswebapp"
 };
 const DEFAULT_APPEARANCE = { theme: "dark", palette: "default" };
@@ -676,6 +676,10 @@ function renderAddSale(account) {
         <label>Sale Value</label>
         <input name="price" inputmode="decimal" placeholder="Example: 799" required>
       </div>
+      <label class="check-row">
+        <input type="checkbox" name="refund" value="1">
+        <span>Mark as refund</span>
+      </label>
       <button class="button">Complete Sale</button>
       <p class="muted">Sale will be saved locally and uploaded on the next successful sync.</p>
     </form>
@@ -736,18 +740,18 @@ function sortedSalesForDay(account, day) {
 function saleEditRow(sale) {
   const isEditing = state.editSaleId === sale.id;
   const rowColor = brandColor(sale.brand);
-  const time = saleTimeLabel(sale);
+  const meta = saleMetaLabel(sale);
   return `
-    <div class="sale-table-item" style="--brand:${rowColor}">
+    <div class="sale-table-item ${saleIsRefund(sale) ? "refund-sale" : ""}" style="--brand:${rowColor}">
       <div class="sale-table-row">
         <div class="sale-cell brand-cell">
           <span class="brand-dot"></span>
           <strong>${esc(sale.brand || "Unknown")}</strong>
-          ${time ? `<small>${esc(time)}</small>` : ""}
+          ${meta ? `<small>${esc(meta)}</small>` : ""}
         </div>
         <div class="sale-cell model-cell">${esc(saleRowModel(sale))}</div>
         <div class="sale-cell size-cell">${esc(saleRowSize(sale))}</div>
-        <div class="sale-cell price-cell">${money(sale.price)}</div>
+        <div class="sale-cell price-cell">${saleIsRefund(sale) ? `-${money(sale.price)}` : money(sale.price)}</div>
         <div class="sale-row-actions">
           <button class="mini-btn" type="button" data-action="edit-sale" data-value="${esc(sale.id)}">${isEditing ? "Close" : "Edit"}</button>
           <button class="mini-btn danger" type="button" data-action="delete-sale" data-value="${esc(sale.id)}">Del</button>
@@ -776,6 +780,7 @@ function saleEditForm(sale) {
         <div class="field" data-hisense-sale-field ${isHisense ? "" : "hidden"}><label>Model</label><select name="model" data-sale-model>${options(modelValues, isHisense ? sale.model : "")}</select></div>
         <div class="field" data-hisense-sale-field data-tv-only ${isHisense && !isSoundbar ? "" : "hidden"}><label>Size</label><select name="size">${options(sizeOptions(), isHisense && !isSoundbar ? sale.size : "")}</select></div>
         <div class="field"><label>Value</label><input name="price" inputmode="decimal" value="${esc(sale.price)}" required></div>
+        <label class="check-row inline-check"><input type="checkbox" name="refund" value="1" ${saleIsRefund(sale) ? "checked" : ""}><span>Refund</span></label>
       </div>
       <div class="row-actions">
         <button class="button secondary">Save</button>
@@ -800,6 +805,12 @@ function saleTimeLabel(sale) {
   const timestamp = Number(sale.createdAt || 0);
   if (!timestamp) return "";
   return new Date(timestamp).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+}
+
+function saleMetaLabel(sale) {
+  const time = saleTimeLabel(sale);
+  if (!saleIsRefund(sale)) return time;
+  return time ? `Refund | ${time}` : "Refund";
 }
 
 function renderSkuLookup() {
@@ -1124,6 +1135,8 @@ function renderAsm(account) {
     acc.hisenseUnits += region.hisenseUnits;
     acc.totalRevenue += region.totalRevenue;
     acc.hisenseRevenue += region.hisenseRevenue;
+    acc.sovTotalRevenue += region.sovTotalRevenue;
+    acc.sovHisenseRevenue += region.sovHisenseRevenue;
     acc.soundbarUnits += region.soundbarUnits;
     acc.commissionDue += region.commissionDue;
     if (region.totalUnits > 0) acc.activeRegions += 1;
@@ -1286,6 +1299,7 @@ async function saveSale(data) {
     model: isHisense ? data.model || "" : "",
     size: isHisense && itemType === "tv" ? data.size || "" : "",
     price,
+    refund: data.refund === "1",
     soundbarUnits: isHisense && itemType === "soundbar" ? 1 : 0,
     soundbarRevenue: isHisense && itemType === "soundbar" ? price : 0,
     username: account.username,
@@ -1328,6 +1342,7 @@ async function saveSaleEdit(data) {
     model: brand === "Hisense" ? String(data.model || "").trim() : "",
     size: brand === "Hisense" && itemType === "tv" ? String(data.size || "").trim() : "",
     price,
+    refund: data.refund === "1",
     soundbarUnits: brand === "Hisense" && itemType === "soundbar" ? 1 : 0,
     soundbarRevenue: brand === "Hisense" && itemType === "soundbar" ? price : 0,
     username: account.username,
@@ -1868,6 +1883,8 @@ function dashboardStats(account, timeframe, scope) {
     shareOfValue: 0,
     totalRevenue: 0,
     hisenseRevenue: 0,
+    sovTotalRevenue: 0,
+    sovHisenseRevenue: 0,
     hisenseAsp: 0,
     soundbarRevenue: 0,
     premiumTotalRevenue: 0,
@@ -1879,14 +1896,21 @@ function dashboardStats(account, timeframe, scope) {
     const itemType = saleItemType(sale);
     const saleValue = Number(sale.price || 0);
     const brand = BRANDS.includes(sale.brand) ? sale.brand : "Other";
+    const refund = saleIsRefund(sale);
     if (sale.brand === "Hisense" && itemType === "soundbar") {
-      stats.soundbarUnits += 1;
-      stats.soundbarRevenue += saleValue;
+      if (!refund) {
+        stats.soundbarUnits += 1;
+        stats.soundbarRevenue += saleValue;
+      }
       continue;
     }
+    const sovValue = refund ? -saleValue : saleValue;
+    stats.sovTotalRevenue += sovValue;
+    stats.brandRevenue[brand] += sovValue;
+    if (sale.brand === "Hisense") stats.sovHisenseRevenue += sovValue;
+    if (refund) continue;
     stats.totalUnits += 1;
     stats.totalRevenue += saleValue;
-    stats.brandRevenue[brand] += saleValue;
     if (sale.brand === "Hisense") {
       stats.hisenseUnits += 1;
       stats.hisenseRevenue += saleValue;
@@ -1897,7 +1921,7 @@ function dashboardStats(account, timeframe, scope) {
       }
     }
   }
-  stats.shareOfValue = stats.totalRevenue <= 0 ? 0 : Math.round((stats.hisenseRevenue * 100) / stats.totalRevenue);
+  stats.shareOfValue = stats.sovTotalRevenue <= 0 ? 0 : Math.round((stats.sovHisenseRevenue * 100) / stats.sovTotalRevenue);
   stats.hisenseAsp = stats.hisenseUnits <= 0 ? 0 : stats.hisenseRevenue / stats.hisenseUnits;
   return stats;
 }
@@ -1916,7 +1940,7 @@ function commissionStats(account) {
     year: blankCommissionBucket(yearStart, today)
   };
   for (const sale of state.sales) {
-    if (sale.brand !== "Hisense" || !belongsTo(sale, account)) continue;
+    if (sale.brand !== "Hisense" || saleIsRefund(sale) || !belongsTo(sale, account)) continue;
     const saleDate = parseIsoDate(sale.date);
     if (!saleDate || saleDate > today) continue;
     const value = commissionValue(sale);
@@ -1934,6 +1958,7 @@ function blankCommissionBucket(start, end, period = null) {
 
 function addCommissionEntry(bucket, saleDate, sale, value) {
   if (saleDate < bucket.start || saleDate > bucket.end) return;
+  if (saleIsRefund(sale)) return;
   const cleanValue = Number(value || 0);
   const type = commissionMixType(sale);
   bucket.units += 1;
@@ -1947,16 +1972,24 @@ function regionStats() {
   for (const sale of state.sales) {
     const region = regions.find((item) => item.region.toLowerCase() === canonicalRegion(sale.region).toLowerCase());
     if (!region) continue;
+    const saleValue = Number(sale.price || 0);
+    const refund = saleIsRefund(sale);
     if (sale.brand === "Hisense" && saleItemType(sale) === "soundbar") {
-      region.soundbarUnits += 1;
-      region.commissionDue += commissionValue(sale);
+      if (!refund) {
+        region.soundbarUnits += 1;
+        region.commissionDue += commissionValue(sale);
+      }
       continue;
     }
+    const sovValue = refund ? -saleValue : saleValue;
+    region.sovTotalRevenue += sovValue;
+    if (sale.brand === "Hisense") region.sovHisenseRevenue += sovValue;
+    if (refund) continue;
     region.totalUnits += 1;
-    region.totalRevenue += Number(sale.price || 0);
+    region.totalRevenue += saleValue;
     if (sale.brand === "Hisense") {
       region.hisenseUnits += 1;
-      region.hisenseRevenue += Number(sale.price || 0);
+      region.hisenseRevenue += saleValue;
       region.commissionDue += commissionValue(sale);
     }
   }
@@ -1965,11 +1998,11 @@ function regionStats() {
 }
 
 function blankRegion(region) {
-  return { region, totalUnits: 0, hisenseUnits: 0, soundbarUnits: 0, shareOfValue: 0, activeRegions: 0, totalRevenue: 0, hisenseRevenue: 0, hisenseAsp: 0, commissionDue: 0 };
+  return { region, totalUnits: 0, hisenseUnits: 0, soundbarUnits: 0, shareOfValue: 0, activeRegions: 0, totalRevenue: 0, hisenseRevenue: 0, sovTotalRevenue: 0, sovHisenseRevenue: 0, hisenseAsp: 0, commissionDue: 0 };
 }
 
 function finishRegion(region) {
-  region.shareOfValue = region.totalRevenue <= 0 ? 0 : Math.round((region.hisenseRevenue * 100) / region.totalRevenue);
+  region.shareOfValue = region.sovTotalRevenue <= 0 ? 0 : Math.round((region.sovHisenseRevenue * 100) / region.sovTotalRevenue);
   region.hisenseAsp = region.hisenseUnits <= 0 ? 0 : region.hisenseRevenue / region.hisenseUnits;
 }
 
@@ -2088,6 +2121,7 @@ function normalizeSale(sale) {
     model: String(sale.model || ""),
     size: String(sale.size || ""),
     price: Number(sale.price || 0),
+    refund: saleIsRefund(sale),
     soundbarUnits: saleItemType(sale) === "soundbar" ? 1 : Number(sale.soundbarUnits || 0),
     soundbarRevenue: saleItemType(sale) === "soundbar" ? Number(sale.price || 0) : Number(sale.soundbarRevenue || 0),
     username: String(sale.username || ""),
@@ -2099,6 +2133,11 @@ function normalizeSale(sale) {
 
 function persistSales() {
   writeJson(KEY.sales, state.sales);
+}
+
+function saleIsRefund(sale) {
+  const value = sale?.refund ?? sale?.isRefund ?? sale?.is_refund;
+  return value === true || value === 1 || value === "1" || String(value || "").toLowerCase() === "true" || String(value || "").toLowerCase() === "on";
 }
 
 function goDashboard() {
@@ -2203,7 +2242,7 @@ function drawDashboardShareImage(ctx, layout, stats) {
   drawShareText(ctx, `${stats.shareOfValue}%`, 14, y + 78, 46, sovColor, 900);
   const gaugeWidth = Math.min(layout.width - 38, 320);
   drawShareGauge(ctx, stats, layout.width / 2, y + layout.sovHeight - 32, gaugeWidth, sovColor);
-  drawShareCenteredText(ctx, `${money(stats.hisenseRevenue)} / ${money(stats.totalRevenue)}`, layout.width / 2, y + 146, 13, "#9dabc0", 800);
+  drawShareCenteredText(ctx, `${money(stats.sovHisenseRevenue)} / ${money(stats.sovTotalRevenue)}`, layout.width / 2, y + 146, 13, "#9dabc0", 800);
 
   y += layout.sovHeight + layout.gap;
   drawShareKpi(ctx, 0, y, layout.half, layout.smallHeight, "Hisense Units", String(stats.hisenseUnits), `of ${stats.totalUnits} total units across brands`, "#00aaa6");
@@ -2479,7 +2518,7 @@ function premiumMix(stats) {
 
 function brandShareBar(stats) {
   const segments = orderedBrandSegments(stats);
-  const legendSegments = segments.filter((item) => item.value > 0 || item.brand === "Hisense");
+  const legendSegments = segments.filter((item) => item.value !== 0 || item.brand === "Hisense");
   const arcSegments = brandArcSegments(stats);
   const score = Math.max(0, Math.min(100, Number(stats.shareOfValue) || 0));
   const needle = gaugePoint(score, 76);
@@ -2507,7 +2546,7 @@ function brandShareBar(stats) {
           <text class="brand-share-end-label" x="28" y="138">0%</text>
           <text class="brand-share-end-label" x="212" y="138">100%</text>
         </svg>
-        <div class="brand-share-value">${money(stats.hisenseRevenue)} / ${money(stats.totalRevenue)}</div>
+        <div class="brand-share-value">${money(stats.sovHisenseRevenue)} / ${money(stats.sovTotalRevenue)}</div>
       </div>
       <div class="brand-share-legend">
         ${legendSegments.map((item) => `<span><i class="swatch" style="background:${item.color}"></i>${esc(item.brand)} ${shareLabel(item.pct)}</span>`).join("")}
@@ -2531,6 +2570,7 @@ function brandShareGradient(item) {
 }
 
 function shareLabel(percent) {
+  if (percent < 0) return "below 0%";
   if (percent > 0 && percent < 1) return `${Math.max(0.1, Math.round(percent * 10) / 10)}%`;
   return `${Math.round(percent)}%`;
 }
@@ -2540,10 +2580,10 @@ function brandColor(brand) {
 }
 
 function orderedBrandSegments(stats) {
-  const total = stats.totalRevenue;
+  const total = Number(stats.sovTotalRevenue || 0);
   const segments = BRANDS.map((brand) => {
     const value = Number(stats.brandRevenue?.[brand] || 0);
-    const pct = total <= 0 ? 0 : (value * 100) / total;
+    const pct = total <= 0 ? (value < 0 ? -1 : 0) : (value * 100) / total;
     return { brand, value, pct, color: brandColor(brand) };
   });
   const hisense = segments.find((item) => item.brand === "Hisense");
@@ -2555,12 +2595,14 @@ function orderedBrandSegments(stats) {
 
 function brandArcSegments(stats) {
   const visibleSegments = orderedBrandSegments(stats).filter((item) => item.value > 0);
+  const positiveTotal = visibleSegments.reduce((sum, item) => sum + item.value, 0);
   const arcSegments = [];
   let cursor = 0;
 
   visibleSegments.forEach((item, index) => {
     const start = cursor;
-    const end = index === visibleSegments.length - 1 ? 100 : Math.min(100, cursor + item.pct);
+    const displayPct = positiveTotal <= 0 ? 0 : (item.value * 100) / positiveTotal;
+    const end = index === visibleSegments.length - 1 ? 100 : Math.min(100, cursor + displayPct);
     cursor = end;
     if (end > start) arcSegments.push({ ...item, start, end, gradientId: `brand-share-gradient-${index}` });
   });

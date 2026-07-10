@@ -470,8 +470,8 @@ async function adminHome(db, imported = false) {
     ${soundbarSection(soundbarModels, rates)}
     <section class="card">
       <h2>Uploaded Sales</h2>
-      <table class="table"><tr><th>Date</th><th>User</th><th>Region</th><th>Store</th><th>Brand</th><th>Type</th><th>Model</th><th>Size</th><th>Value</th></tr>
-        ${sales.map((sale) => `<tr><td>${escapeHtml(sale.date)}</td><td>${escapeHtml(sale.username)}</td><td>${escapeHtml(sale.region)}</td><td>${escapeHtml(sale.store)}</td><td>${escapeHtml(sale.brand)}</td><td>${escapeHtml(sale.item_type)}</td><td>${escapeHtml(sale.model)}</td><td>${escapeHtml(sale.size)}</td><td>${money(sale.price)}</td></tr>`).join("")}
+      <table class="table"><tr><th>Date</th><th>User</th><th>Region</th><th>Store</th><th>Brand</th><th>Type</th><th>Model</th><th>Size</th><th>Value</th><th>Refund</th></tr>
+        ${sales.map((sale) => `<tr><td>${escapeHtml(sale.date)}</td><td>${escapeHtml(sale.username)}</td><td>${escapeHtml(sale.region)}</td><td>${escapeHtml(sale.store)}</td><td>${escapeHtml(sale.brand)}</td><td>${escapeHtml(sale.item_type)}</td><td>${escapeHtml(sale.model)}</td><td>${escapeHtml(sale.size)}</td><td>${money(sale.price)}</td><td>${sale.refund ? "Yes" : ""}</td></tr>`).join("")}
       </table>
     </section>
     ${skuSection(skuModels, skuSizes, skus)}
@@ -756,6 +756,10 @@ async function ensureDefaults(db) {
 }
 
 async function ensureSchema(db) {
+  const salesColumns = await all(db, "PRAGMA table_info(sales)");
+  if (salesColumns.length && !salesColumns.some((column) => column.name === "refund")) {
+    await db.prepare("ALTER TABLE sales ADD COLUMN refund INTEGER NOT NULL DEFAULT 0").run();
+  }
   const tables = await all(db, "SELECT name FROM sqlite_master WHERE type='table' AND name='product_models'");
   if (tables.length) {
     const columns = await all(db, "PRAGMA table_info(product_models)");
@@ -788,8 +792,8 @@ async function getUser(db, username) {
 }
 
 async function upsertSale(db, sale) {
-  await db.prepare("INSERT INTO sales (id,date,brand,item_type,model,size,price,username,region,store,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET date=excluded.date, brand=excluded.brand, item_type=excluded.item_type, model=excluded.model, size=excluded.size, price=excluded.price, username=excluded.username, region=excluded.region, store=excluded.store, created_at=excluded.created_at")
-    .bind(sale.id, sale.date, sale.brand, sale.itemType, sale.model, sale.size, sale.price, sale.username, sale.region, sale.store, sale.createdAt).run();
+  await db.prepare("INSERT INTO sales (id,date,brand,item_type,model,size,price,refund,username,region,store,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET date=excluded.date, brand=excluded.brand, item_type=excluded.item_type, model=excluded.model, size=excluded.size, price=excluded.price, refund=excluded.refund, username=excluded.username, region=excluded.region, store=excluded.store, created_at=excluded.created_at")
+    .bind(sale.id, sale.date, sale.brand, sale.itemType, sale.model, sale.size, sale.price, sale.refund ? 1 : 0, sale.username, sale.region, sale.store, sale.createdAt).run();
 }
 
 function normalizeSale(raw, user) {
@@ -803,6 +807,7 @@ function normalizeSale(raw, user) {
     model: brand === "Hisense" ? clean(raw?.model) : "",
     size: brand === "Hisense" && itemType === "tv" ? clean(raw?.size) : "",
     price: Number(raw?.price || 0),
+    refund: truthyFlag(raw?.refund || raw?.isRefund || raw?.is_refund),
     username: clean(raw?.username || user.username),
     region: user.region,
     store: user.store,
@@ -827,6 +832,7 @@ function legacySaleToDb(raw) {
     model: brand === "Hisense" ? clean(raw?.Model || raw?.model) : "",
     size: brand === "Hisense" && itemType === "tv" ? clean(raw?.Size || raw?.size) : "",
     price: Number(raw?.Price || raw?.price || 0),
+    refund: truthyFlag(raw?.Refund || raw?.refund || raw?.IsRefund || raw?.isRefund || raw?.is_refund),
     username,
     region,
     store,
@@ -1168,6 +1174,7 @@ function saleToClient(row) {
     model: row.model,
     size: row.size,
     price: Number(row.price || 0),
+    refund: Boolean(row.refund),
     soundbarUnits: row.item_type === "soundbar" ? 1 : 0,
     soundbarRevenue: row.item_type === "soundbar" ? Number(row.price || 0) : 0,
     username: row.username,
@@ -1215,6 +1222,10 @@ function canonicalRegion(region) {
 
 function clean(value) {
   return String(value ?? "").trim();
+}
+
+function truthyFlag(value) {
+  return value === true || value === 1 || value === "1" || clean(value).toLowerCase() === "true" || clean(value).toLowerCase() === "on";
 }
 
 function uniqueCleanList(values) {
