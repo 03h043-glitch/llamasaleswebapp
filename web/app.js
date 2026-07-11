@@ -97,8 +97,8 @@ const SKU_DATA = {
   }
 };
 const APP_BUILD = {
-  version: "v32",
-  baseCommit: "276ff34",
+  version: "v33",
+  baseCommit: "d73c646",
   repo: "03h043-glitch/llamasaleswebapp"
 };
 const DEFAULT_APPEARANCE = { theme: "dark", palette: "default" };
@@ -733,10 +733,30 @@ function sortedSalesForDay(account, day) {
     const saleDate = parseIsoDate(sale.date);
     return saleDate && belongsTo(sale, account) && sameDate(saleDate, day);
   });
-  if (state.salesSort === "brand") return rows.sort((a, b) => a.brand.localeCompare(b.brand) || Number(b.createdAt || 0) - Number(a.createdAt || 0));
+  if (state.salesSort === "brand") return rows.sort(compareSalesByBrandThenSize);
   if (state.salesSort === "value") return rows.sort((a, b) => Number(b.price || 0) - Number(a.price || 0));
   if (state.salesSort === "model") return rows.sort((a, b) => saleName(a).localeCompare(saleName(b)));
   return rows.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+}
+
+function compareSalesByBrandThenSize(a, b) {
+  return a.brand.localeCompare(b.brand, undefined, { sensitivity: "base" })
+    || compareSaleTvSize(a, b)
+    || saleName(a).localeCompare(saleName(b), undefined, { sensitivity: "base", numeric: true })
+    || Number(b.createdAt || 0) - Number(a.createdAt || 0);
+}
+
+function compareSaleTvSize(a, b) {
+  const left = saleTvSize(a);
+  const right = saleTvSize(b);
+  if (!left && !right) return 0;
+  if (!left) return 1;
+  if (!right) return -1;
+  return compareSizes(left, right);
+}
+
+function saleTvSize(sale) {
+  return sale.brand === "Hisense" && saleItemType(sale) === "tv" ? String(sale.size || "").trim() : "";
 }
 
 function saleEditRow(sale) {
