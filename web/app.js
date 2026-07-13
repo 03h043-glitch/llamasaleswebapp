@@ -97,8 +97,8 @@ const SKU_DATA = {
   }
 };
 const APP_BUILD = {
-  version: "v33",
-  baseCommit: "d73c646",
+  version: "v34",
+  baseCommit: "da95f49",
   repo: "03h043-glitch/llamasaleswebapp"
 };
 const DEFAULT_APPEARANCE = { theme: "dark", palette: "default" };
@@ -2346,12 +2346,18 @@ function drawShareGauge(ctx, stats, centerX, centerY, width, accent) {
 
   const arcSegments = brandArcSegments(stats);
   for (const item of arcSegments) {
+    ctx.save();
     ctx.lineCap = "butt";
     ctx.strokeStyle = shareArcGradient(ctx, item.color, centerY - radius, centerY + lineWidth);
+    ctx.shadowColor = "rgba(0,0,0,0.34)";
+    ctx.shadowBlur = 4 * scale;
+    ctx.shadowOffsetY = 3 * scale;
     ctx.beginPath();
     ctx.arc(centerX, centerY, radius, percentAngle(item.start), percentAngle(item.end));
     ctx.stroke();
+    ctx.restore();
   }
+  drawShareGaugeHighlight(ctx, centerX, centerY, radius, scale);
   drawShareGaugeMarker(ctx, 10, centerX, centerY, scale);
   drawShareGaugeMarker(ctx, 20, centerX, centerY, scale);
   drawShareGaugeLabel(ctx, "10%", 10, centerX, centerY, 116 * scale);
@@ -2373,6 +2379,18 @@ function drawShareGauge(ctx, stats, centerX, centerY, width, accent) {
   ctx.fill();
   ctx.strokeStyle = "rgba(255,255,255,0.78)";
   ctx.lineWidth = 2 * scale;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawShareGaugeHighlight(ctx, centerX, centerY, radius, scale) {
+  ctx.save();
+  ctx.translate(0, -4 * scale);
+  ctx.strokeStyle = "rgba(255,255,255,0.18)";
+  ctx.lineWidth = 4 * scale;
+  ctx.lineCap = "butt";
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, radius, percentAngle(0), percentAngle(100));
   ctx.stroke();
   ctx.restore();
 }
