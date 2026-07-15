@@ -121,6 +121,7 @@ async function handleApi(request, env, url) {
     if (Array.isArray(body.sales)) {
       for (const rawSale of body.sales) {
         const sale = normalizeSale(rawSale, user);
+        if (!sale) continue;
         if (!sale.id || sale.username.toLowerCase() !== user.username.toLowerCase()) continue;
         await upsertSale(db, sale);
       }
@@ -437,7 +438,7 @@ function parseCombo(value) {
 async function adminHome(db, imported = false) {
   const users = await all(db, "SELECT * FROM users ORDER BY username");
   const missingUsers = await salesUsersWithoutAccounts(db, users);
-  const sales = await all(db, "SELECT * FROM sales ORDER BY date DESC, created_at DESC LIMIT 100");
+  const sales = await all(db, "SELECT * FROM sales WHERE brand='Hisense' ORDER BY date DESC, created_at DESC LIMIT 100");
   const tvModels = await modelList(db, "tv");
   const soundbarModels = await modelList(db, "soundbar");
   const sizes = await sizeList(db);
@@ -446,10 +447,19 @@ async function adminHome(db, imported = false) {
   const skuModels = skuModelList(tvModels);
   const skuSizes = skuSizeList(sizes);
   const modelCategories = await modelCategoryMap(db);
-  const totals = await db.prepare("SELECT COUNT(*) totalUnits, SUM(CASE WHEN brand='Hisense' AND item_type='tv' THEN 1 ELSE 0 END) hisenseUnits, SUM(price) totalRevenue, SUM(CASE WHEN brand='Hisense' AND item_type='tv' THEN price ELSE 0 END) hisenseRevenue FROM sales").first();
-  const totalRevenue = Number(totals?.totalRevenue || 0);
-  const hisenseRevenue = Number(totals?.hisenseRevenue || 0);
-  const share = totalRevenue <= 0 ? 0 : Math.round(hisenseRevenue * 100 / totalRevenue);
+  const totals = await db.prepare(`
+    SELECT
+      COUNT(*) totalRows,
+      SUM(CASE WHEN item_type='tv' AND refund=0 THEN 1 ELSE 0 END) tvUnits,
+      SUM(CASE WHEN item_type='soundbar' AND refund=0 THEN 1 ELSE 0 END) soundbarUnits,
+      SUM(CASE WHEN item_type='tv' AND refund=0 THEN price ELSE 0 END) tvRevenue,
+      SUM(CASE WHEN item_type='soundbar' AND refund=0 THEN price ELSE 0 END) soundbarRevenue
+    FROM sales
+    WHERE brand='Hisense'
+  `).first();
+  const tvRevenue = Number(totals?.tvRevenue || 0);
+  const soundbarRevenue = Number(totals?.soundbarRevenue || 0);
+  const totalRevenue = tvRevenue + soundbarRevenue;
 
   return page("LlamaSales Backend", `
     <div class="actions">
@@ -458,10 +468,10 @@ async function adminHome(db, imported = false) {
       <form method="post" action="/admin/logout"><button class="danger">Sign Out</button></form>
     </div>
     <div class="grid">
-      ${kpi("Total Units", totals?.totalUnits || 0, "uploaded sales")}
-      ${kpi("Hisense TV Units", totals?.hisenseUnits || 0, "uploaded Hisense TVs")}
-      ${kpi("Hisense SOV", `${share}%`, "share of TV value")}
-      ${kpi("Sales Value", money(totalRevenue), "all brands")}
+      ${kpi("TV Units", totals?.tvUnits || 0, "uploaded Hisense TVs")}
+      ${kpi("Soundbar Units", totals?.soundbarUnits || 0, "uploaded soundbars")}
+      ${kpi("TV Value", money(tvRevenue), "Hisense TV value")}
+      ${kpi("Total Value", money(totalRevenue), "TV and soundbar value")}
     </div>
     ${imported ? `<p class="notice">Legacy backup import completed. Any valid users, sales, and commission rates in the pasted backup were merged into D1.</p>` : ""}
     ${usersSection(users, missingUsers)}
@@ -703,7 +713,7 @@ async function clientPayload(db, user) {
     ok: true,
     serverTime: new Date().toISOString(),
     account: userToClient(user),
-    sales: (await all(db, "SELECT * FROM sales ORDER BY created_at DESC")).map(saleToClient),
+    sales: (await all(db, "SELECT * FROM sales WHERE brand='Hisense' ORDER BY created_at DESC")).map(saleToClient),
     commissionRates: await ratesClientMap(db),
     commissionRateHistory: await rateHistoryClientList(db),
     meta: await publicMeta(db)
@@ -797,17 +807,20 @@ async function upsertSale(db, sale) {
 }
 
 function normalizeSale(raw, user) {
-  const brand = clean(raw?.brand);
-  const itemType = brand === "Hisense" && clean(raw?.itemType) === "soundbar" ? "soundbar" : "tv";
+  const incomingBrand = clean(raw?.brand);
+  if (incomingBrand && incomingBrand !== "Hisense") return null;
+  const brand = "Hisense";
+  const refund = truthyFlag(raw?.refund || raw?.isRefund || raw?.is_refund);
+  const itemType = !refund && clean(raw?.itemType) === "soundbar" ? "soundbar" : "tv";
   return {
     id: clean(raw?.id),
     date: clean(raw?.date) || new Date().toISOString().slice(0, 10),
     brand,
     itemType,
-    model: brand === "Hisense" ? clean(raw?.model) : "",
-    size: brand === "Hisense" && itemType === "tv" ? clean(raw?.size) : "",
+    model: refund ? "" : clean(raw?.model),
+    size: !refund && itemType === "tv" ? clean(raw?.size) : "",
     price: Number(raw?.price || 0),
-    refund: truthyFlag(raw?.refund || raw?.isRefund || raw?.is_refund),
+    refund,
     username: clean(raw?.username || user.username),
     region: user.region,
     store: user.store,
@@ -817,6 +830,7 @@ function normalizeSale(raw, user) {
 
 function legacySaleToDb(raw) {
   const brand = clean(raw?.Brand || raw?.brand);
+  if (brand !== "Hisense") return null;
   const username = clean(raw?.Username || raw?.username);
   const region = canonicalRegion(raw?.Region || raw?.region);
   const store = clean(raw?.Store || raw?.store);

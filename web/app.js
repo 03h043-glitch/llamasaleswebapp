@@ -4,7 +4,7 @@ const REGIONS = [
   "South Coast", "Wales and Bristol"
 ];
 
-const BRANDS = ["Hisense", "TCL", "LG", "Samsung", "Sony", "Other"];
+const BRANDS = ["Hisense"];
 const MODELS = ["A4Q", "A5Q", "A6Q", "A7Q", "E7Q", "E7Q Pro", "U7Q", "U7Q Pro", "U8Q", "U7S", "U7S Pro", "UR8S", "UR9S", "C2", "C2 Ultra", "Other"];
 const SOUNDBAR_MODELS = ["AX3100Q", "AX5100Q", "AX5125H", "AX5125Q", "AX7100Q", "AX8100Q", "Other"];
 const SIZES = ["32", "40", "43", "50", "55", "65", "75", "85", "100", "Other"];
@@ -26,8 +26,8 @@ const PREMIUM = [
   { label: "UHD", color: "var(--cyan)" },
   { label: "QLED", color: "var(--teal)" },
   { label: "MINI LED", color: "var(--gold)" },
-  { label: "RGB", color: "var(--blood)" },
-  { label: "LASER", color: "var(--laser)" }
+  { label: "LASER", color: "var(--laser)" },
+  { label: "RGB", color: "var(--blood)" }
 ];
 const PRODUCT_TYPES = PREMIUM.map((item) => item.label);
 const DEFAULT_MODEL_CATEGORIES = {
@@ -55,10 +55,6 @@ const ADD_NEW_STORE = "__add_new_store__";
 const DASHBOARD_ACCENT = "var(--hisense)";
 const BRAND_COLORS = {
   Hisense: "#00aaa6",
-  TCL: "#ed1c24",
-  LG: "#a50034",
-  Samsung: "#034ea2",
-  Sony: "#000000",
   Other: "#cbd5e1"
 };
 const SKU_DATA = {
@@ -97,8 +93,8 @@ const SKU_DATA = {
   }
 };
 const APP_BUILD = {
-  version: "v34",
-  baseCommit: "da95f49",
+  version: "v35",
+  baseCommit: "b95a390",
   repo: "03h043-glitch/llamasaleswebapp"
 };
 const DEFAULT_APPEARANCE = { theme: "dark", palette: "default" };
@@ -621,7 +617,6 @@ function renderServerPanel(forceForm = false) {
 
 function renderDashboard(account) {
   const stats = dashboardStats(account, state.filters.timeframe, state.filters.scope);
-  const sovColor = stats.shareOfValue < 10 ? "var(--red)" : stats.shareOfValue < 20 ? "var(--yellow)" : "var(--green)";
   return `
     <div class="segmented dashboard-filters">
       <div class="seg-row four">${TIMEFRAMES.map((time) => buttonSeg("filter-time", time, shortTime(time), state.filters.timeframe === time)).join("")}</div>
@@ -630,14 +625,13 @@ function renderDashboard(account) {
 
     <div class="dashboard-card-crop">
       <div class="grid">
-        ${kpi("Hisense Share of Value", `${stats.shareOfValue}%`, "", sovColor, "span-4 large sov-card", brandShareBar(stats))}
-        ${kpi("Hisense Units", stats.hisenseUnits, `of ${stats.totalUnits} total units across brands`, DASHBOARD_ACCENT, "span-2")}
-        ${kpi("Hisense Revenue", money(stats.hisenseRevenue), `vs ${money(stats.totalRevenue)} across all brands`, DASHBOARD_ACCENT, "span-2")}
+        ${kpi("Premium Mix", money(stats.hisenseRevenue), `${stats.hisenseUnits} Hisense TV${stats.hisenseUnits === 1 ? "" : "s"}`, DASHBOARD_ACCENT, "span-4 large sov-card", premiumGauge(stats))}
+        ${kpi("Hisense Units", stats.hisenseUnits, "Hisense TVs logged", DASHBOARD_ACCENT, "span-2")}
+        ${kpi("Hisense Revenue", money(stats.hisenseRevenue), "Hisense TV value", DASHBOARD_ACCENT, "span-2")}
         ${kpi("Hisense ASP", money(stats.hisenseAsp), "average selling price", DASHBOARD_ACCENT, "span-2")}
         ${kpi("Soundbar Sales", stats.soundbarUnits, `${money(stats.soundbarRevenue)} soundbar value`, DASHBOARD_ACCENT, "span-2")}
       </div>
 
-      ${premiumMix(stats)}
       ${buildMarker()}
     </div>
   `;
@@ -653,26 +647,23 @@ function renderAddSale(account) {
     <form class="card stack" data-form="sale">
       <div>
         <h2>Add Sale</h2>
-        <p class="muted">Choose a brand, then add the required sale details.</p>
+        <p class="muted">Log a Hisense TV or soundbar sale.</p>
       </div>
-      <div class="field">
-        <label>Brand</label>
-        <select name="brand" id="sale-brand" data-sale-brand required>${optionsWithPlaceholder(BRANDS, "Choose brand")}</select>
-      </div>
-      <div class="field" data-hisense-sale-field hidden>
+      <input type="hidden" name="brand" value="Hisense">
+      <div class="field" data-hisense-sale-field>
         <label>Hisense Item</label>
         <select name="itemType" data-sale-type>
           <option value="tv" selected>TV</option>
           <option value="soundbar">Soundbar</option>
         </select>
       </div>
-      <div class="field" data-hisense-sale-field hidden>
+      <div class="field" data-hisense-sale-field>
         <label>Hisense Model</label>
-        <select name="model" data-sale-model>${optionsWithPlaceholder(modelOptions(), "Choose model")}</select>
+        <select name="model" data-sale-model required>${optionsWithPlaceholder(modelOptions(), "Choose model")}</select>
       </div>
-      <div class="field" data-hisense-sale-field data-tv-only hidden>
+      <div class="field" data-hisense-sale-field data-tv-only>
         <label>Screen Size</label>
-        <select name="size">${optionsWithPlaceholder(sizeOptions(), "Choose size")}</select>
+        <select name="size" required>${optionsWithPlaceholder(sizeOptions(), "Choose size")}</select>
       </div>
       <div class="field">
         <label>Sale Value</label>
@@ -731,7 +722,7 @@ function renderTodaysSales(account) {
 function sortedSalesForDay(account, day) {
   const rows = state.sales.filter((sale) => {
     const saleDate = parseIsoDate(sale.date);
-    return saleDate && belongsTo(sale, account) && sameDate(saleDate, day);
+    return sale.brand === "Hisense" && saleDate && belongsTo(sale, account) && sameDate(saleDate, day);
   });
   if (state.salesSort === "brand") return rows.sort(compareSalesByBrandThenSize);
   if (state.salesSort === "value") return rows.sort((a, b) => Number(b.price || 0) - Number(a.price || 0));
@@ -785,21 +776,20 @@ function saleEditRow(sale) {
 }
 
 function saleEditForm(sale) {
-  const isHisense = sale.brand === "Hisense";
   const isRefund = saleIsRefund(sale);
   const isSoundbar = saleItemType(sale) === "soundbar";
   const modelValues = isSoundbar ? soundbarModelOptions() : modelOptions();
-  const showHisenseDetails = isHisense && !isRefund;
+  const showHisenseDetails = !isRefund;
   return `
     <form class="sale-edit" data-form="sale-edit">
       <input type="hidden" name="id" value="${esc(sale.id)}">
+      <input type="hidden" name="brand" value="Hisense">
       <div class="sale-edit-title">
         <strong>${esc(saleName(sale))}</strong>
         <span class="muted">${esc(sale.date)} | ${money(sale.price)}</span>
       </div>
       <div class="sale-edit-grid">
         <div class="field"><label>Date</label><input name="date" type="date" value="${esc(sale.date)}" required></div>
-        <div class="field"><label>Brand</label><select name="brand" data-sale-brand>${options(BRANDS, sale.brand)}</select></div>
         <div class="field" data-hisense-sale-field ${showHisenseDetails ? "" : "hidden"}><label>Type</label><select name="itemType" data-sale-type><option value="tv" ${!isSoundbar ? "selected" : ""}>TV</option><option value="soundbar" ${isSoundbar ? "selected" : ""}>Soundbar</option></select></div>
         <div class="field" data-hisense-sale-field ${showHisenseDetails ? "" : "hidden"}><label>Model</label><select name="model" data-sale-model>${options(modelValues, showHisenseDetails ? sale.model : "")}</select></div>
         <div class="field" data-hisense-sale-field data-tv-only ${showHisenseDetails && !isSoundbar ? "" : "hidden"}><label>Size</label><select name="size">${options(sizeOptions(), showHisenseDetails && !isSoundbar ? sale.size : "")}</select></div>
@@ -1159,8 +1149,6 @@ function renderAsm(account) {
     acc.hisenseUnits += region.hisenseUnits;
     acc.totalRevenue += region.totalRevenue;
     acc.hisenseRevenue += region.hisenseRevenue;
-    acc.sovTotalRevenue += region.sovTotalRevenue;
-    acc.sovHisenseRevenue += region.sovHisenseRevenue;
     acc.soundbarUnits += region.soundbarUnits;
     acc.commissionDue += region.commissionDue;
     if (region.totalUnits > 0) acc.activeRegions += 1;
@@ -1175,8 +1163,8 @@ function renderAsm(account) {
     </div>
     <div class="grid">
       ${kpi("Regions", total.activeRegions, "with recorded sales", "var(--violet)", "span-2")}
-      ${kpi("Hisense Units", total.hisenseUnits, `of ${total.totalUnits} total units`, "var(--hisense)", "span-2")}
-      ${kpi("Hisense Value", money(total.hisenseRevenue), `${total.shareOfValue}% share of value`, "var(--green)", "span-2")}
+      ${kpi("Hisense TVs", total.hisenseUnits, "TV sales logged", "var(--hisense)", "span-2")}
+      ${kpi("Hisense Value", money(total.hisenseRevenue), "Hisense TV value", "var(--green)", "span-2")}
       ${kpi("Commission Due", money(total.commissionDue), "configured model rates", "var(--gold)", "span-2")}
     </div>
     ${regions.map(regionCard).join("")}
@@ -1299,20 +1287,19 @@ async function handleRegister(data) {
 async function saveSale(data) {
   const account = currentAccount();
   if (!account) return;
-  const brand = data.brand || "";
+  const brand = "Hisense";
   const price = Number(data.price || 0);
-  if (!brand || !price) {
-    toast("Choose a brand and enter a valid value.");
+  if (!price) {
+    toast("Enter a valid value.");
     return;
   }
-  const isHisense = brand === "Hisense";
   const refund = data.refund === "1";
-  const itemType = isHisense && !refund && data.itemType === "soundbar" ? "soundbar" : "tv";
-  if (isHisense && !refund && !data.model) {
+  const itemType = !refund && data.itemType === "soundbar" ? "soundbar" : "tv";
+  if (!refund && !data.model) {
     toast("Choose the Hisense model.");
     return;
   }
-  if (isHisense && !refund && itemType === "tv" && !data.size) {
+  if (!refund && itemType === "tv" && !data.size) {
     toast("Choose the Hisense model and screen size.");
     return;
   }
@@ -1321,12 +1308,12 @@ async function saveSale(data) {
     date: todayIso(),
     brand,
     itemType,
-    model: isHisense && !refund ? data.model || "" : "",
-    size: isHisense && !refund && itemType === "tv" ? data.size || "" : "",
+    model: !refund ? data.model || "" : "",
+    size: !refund && itemType === "tv" ? data.size || "" : "",
     price,
     refund,
-    soundbarUnits: isHisense && !refund && itemType === "soundbar" ? 1 : 0,
-    soundbarRevenue: isHisense && !refund && itemType === "soundbar" ? price : 0,
+    soundbarUnits: !refund && itemType === "soundbar" ? 1 : 0,
+    soundbarRevenue: !refund && itemType === "soundbar" ? price : 0,
     username: account.username,
     region: account.region,
     store: account.store,
@@ -1344,19 +1331,19 @@ async function saveSaleEdit(data) {
   const account = currentAccount();
   const sale = state.sales.find((item) => item.id === data.id);
   if (!account || !sale) return;
-  const brand = String(data.brand || "").trim();
+  const brand = "Hisense";
   const refund = data.refund === "1";
-  const itemType = brand === "Hisense" && !refund && data.itemType === "soundbar" ? "soundbar" : "tv";
+  const itemType = !refund && data.itemType === "soundbar" ? "soundbar" : "tv";
   const price = Number(data.price || 0);
-  if (!brand || !price) {
-    toast("Choose a brand and enter a valid value.");
+  if (!price) {
+    toast("Enter a valid value.");
     return;
   }
-  if (brand === "Hisense" && !refund && !String(data.model || "").trim()) {
+  if (!refund && !String(data.model || "").trim()) {
     toast("Choose a Hisense model.");
     return;
   }
-  if (brand === "Hisense" && !refund && itemType === "tv" && !String(data.size || "").trim()) {
+  if (!refund && itemType === "tv" && !String(data.size || "").trim()) {
     toast("Choose a TV size.");
     return;
   }
@@ -1365,12 +1352,12 @@ async function saveSaleEdit(data) {
     date: String(data.date || sale.date || todayIso()),
     brand,
     itemType,
-    model: brand === "Hisense" && !refund ? String(data.model || "").trim() : "",
-    size: brand === "Hisense" && !refund && itemType === "tv" ? String(data.size || "").trim() : "",
+    model: !refund ? String(data.model || "").trim() : "",
+    size: !refund && itemType === "tv" ? String(data.size || "").trim() : "",
     price,
     refund,
-    soundbarUnits: brand === "Hisense" && !refund && itemType === "soundbar" ? 1 : 0,
-    soundbarRevenue: brand === "Hisense" && !refund && itemType === "soundbar" ? price : 0,
+    soundbarUnits: !refund && itemType === "soundbar" ? 1 : 0,
+    soundbarRevenue: !refund && itemType === "soundbar" ? price : 0,
     username: account.username,
     region: account.region,
     store: account.store
@@ -1906,48 +1893,34 @@ function dashboardStats(account, timeframe, scope) {
     totalUnits: 0,
     hisenseUnits: 0,
     soundbarUnits: 0,
-    shareOfValue: 0,
     totalRevenue: 0,
     hisenseRevenue: 0,
-    sovTotalRevenue: 0,
-    sovHisenseRevenue: 0,
     hisenseAsp: 0,
     soundbarRevenue: 0,
     premiumTotalRevenue: 0,
-    premiumRevenue: [0, 0, 0, 0, 0],
-    brandRevenue: Object.fromEntries(BRANDS.map((brand) => [brand, 0]))
+    premiumRevenue: [0, 0, 0, 0, 0]
   };
   for (const sale of state.sales) {
     if (!inScope(sale, account, scope) || !inTimeframe(sale, timeframe)) continue;
+    if (sale.brand !== "Hisense") continue;
+    if (saleIsRefund(sale)) continue;
     const itemType = saleItemType(sale);
     const saleValue = Number(sale.price || 0);
-    const brand = BRANDS.includes(sale.brand) ? sale.brand : "Other";
-    const refund = saleIsRefund(sale);
-    if (sale.brand === "Hisense" && itemType === "soundbar") {
-      if (!refund) {
-        stats.soundbarUnits += 1;
-        stats.soundbarRevenue += saleValue;
-      }
+    if (itemType === "soundbar") {
+      stats.soundbarUnits += 1;
+      stats.soundbarRevenue += saleValue;
       continue;
     }
-    const sovValue = refund ? -saleValue : saleValue;
-    stats.sovTotalRevenue += sovValue;
-    stats.brandRevenue[brand] += sovValue;
-    if (sale.brand === "Hisense") stats.sovHisenseRevenue += sovValue;
-    if (refund) continue;
     stats.totalUnits += 1;
     stats.totalRevenue += saleValue;
-    if (sale.brand === "Hisense") {
-      stats.hisenseUnits += 1;
-      stats.hisenseRevenue += saleValue;
-      const index = premiumIndex(sale.model);
-      if (index >= 0) {
-        stats.premiumRevenue[index] += saleValue;
-        stats.premiumTotalRevenue += saleValue;
-      }
+    stats.hisenseUnits += 1;
+    stats.hisenseRevenue += saleValue;
+    const index = premiumIndex(sale.model);
+    if (index >= 0) {
+      stats.premiumRevenue[index] += saleValue;
+      stats.premiumTotalRevenue += saleValue;
     }
   }
-  stats.shareOfValue = stats.sovTotalRevenue <= 0 ? 0 : Math.round((stats.sovHisenseRevenue * 100) / stats.sovTotalRevenue);
   stats.hisenseAsp = stats.hisenseUnits <= 0 ? 0 : stats.hisenseRevenue / stats.hisenseUnits;
   return stats;
 }
@@ -1998,37 +1971,29 @@ function regionStats() {
   for (const sale of state.sales) {
     const region = regions.find((item) => item.region.toLowerCase() === canonicalRegion(sale.region).toLowerCase());
     if (!region) continue;
+    if (sale.brand !== "Hisense") continue;
+    if (saleIsRefund(sale)) continue;
     const saleValue = Number(sale.price || 0);
-    const refund = saleIsRefund(sale);
-    if (sale.brand === "Hisense" && saleItemType(sale) === "soundbar") {
-      if (!refund) {
-        region.soundbarUnits += 1;
-        region.commissionDue += commissionValue(sale);
-      }
+    if (saleItemType(sale) === "soundbar") {
+      region.soundbarUnits += 1;
+      region.commissionDue += commissionValue(sale);
       continue;
     }
-    const sovValue = refund ? -saleValue : saleValue;
-    region.sovTotalRevenue += sovValue;
-    if (sale.brand === "Hisense") region.sovHisenseRevenue += sovValue;
-    if (refund) continue;
     region.totalUnits += 1;
     region.totalRevenue += saleValue;
-    if (sale.brand === "Hisense") {
-      region.hisenseUnits += 1;
-      region.hisenseRevenue += saleValue;
-      region.commissionDue += commissionValue(sale);
-    }
+    region.hisenseUnits += 1;
+    region.hisenseRevenue += saleValue;
+    region.commissionDue += commissionValue(sale);
   }
   regions.forEach(finishRegion);
   return regions;
 }
 
 function blankRegion(region) {
-  return { region, totalUnits: 0, hisenseUnits: 0, soundbarUnits: 0, shareOfValue: 0, activeRegions: 0, totalRevenue: 0, hisenseRevenue: 0, sovTotalRevenue: 0, sovHisenseRevenue: 0, hisenseAsp: 0, commissionDue: 0 };
+  return { region, totalUnits: 0, hisenseUnits: 0, soundbarUnits: 0, activeRegions: 0, totalRevenue: 0, hisenseRevenue: 0, hisenseAsp: 0, commissionDue: 0 };
 }
 
 function finishRegion(region) {
-  region.shareOfValue = region.sovTotalRevenue <= 0 ? 0 : Math.round((region.sovHisenseRevenue * 100) / region.sovTotalRevenue);
   region.hisenseAsp = region.hisenseUnits <= 0 ? 0 : region.hisenseRevenue / region.hisenseUnits;
 }
 
@@ -2252,32 +2217,28 @@ function dashboardShareLayout() {
   const half = (width - gap) / 2;
   const sovHeight = 258;
   const smallHeight = 122;
-  const premiumHeight = 116;
-  const height = sovHeight + gap + smallHeight + gap + smallHeight + gap + premiumHeight;
-  return { width, height, gap, half, sovHeight, smallHeight, premiumHeight };
+  const height = sovHeight + gap + smallHeight + gap + smallHeight;
+  return { width, height, gap, half, sovHeight, smallHeight };
 }
 
 function drawDashboardShareImage(ctx, layout, stats) {
   ctx.clearRect(0, 0, layout.width, layout.height);
-  const sovColor = stats.shareOfValue < 10 ? "#ec4a4a" : stats.shareOfValue < 20 ? "#f5b232" : "#1cb973";
   let y = 0;
-  drawShareCard(ctx, 0, y, layout.width, layout.sovHeight, sovColor);
-  drawShareText(ctx, "Hisense Share of Value", 14, y + 28, 12, "#9dabc0", 800);
-  drawShareText(ctx, `${stats.shareOfValue}%`, 14, y + 78, 46, sovColor, 900);
+  drawShareCard(ctx, 0, y, layout.width, layout.sovHeight, "#00aaa6");
+  drawShareText(ctx, "Premium Mix", 14, y + 28, 12, "#9dabc0", 800);
+  drawShareText(ctx, money(stats.hisenseRevenue), 14, y + 78, 42, "#00aaa6", 900);
   const gaugeWidth = Math.min(layout.width - 38, 320);
-  drawShareGauge(ctx, stats, layout.width / 2, y + layout.sovHeight - 32, gaugeWidth, sovColor);
-  drawShareCenteredText(ctx, `${money(stats.sovHisenseRevenue)} / ${money(stats.sovTotalRevenue)}`, layout.width / 2, y + 146, 13, "#9dabc0", 800);
+  drawShareGauge(ctx, stats, layout.width / 2, y + layout.sovHeight - 32, gaugeWidth);
+  drawShareCenteredText(ctx, `${stats.hisenseUnits} Hisense TV${stats.hisenseUnits === 1 ? "" : "s"}`, layout.width / 2, y + 146, 13, "#9dabc0", 800);
+  drawShareGaugeLegend(ctx, stats, 14, y + layout.sovHeight - 14, layout.width - 28);
 
   y += layout.sovHeight + layout.gap;
-  drawShareKpi(ctx, 0, y, layout.half, layout.smallHeight, "Hisense Units", String(stats.hisenseUnits), `of ${stats.totalUnits} total units across brands`, "#00aaa6");
-  drawShareKpi(ctx, layout.half + layout.gap, y, layout.half, layout.smallHeight, "Hisense Revenue", money(stats.hisenseRevenue), `vs ${money(stats.totalRevenue)} across all brands`, "#00aaa6");
+  drawShareKpi(ctx, 0, y, layout.half, layout.smallHeight, "Hisense Units", String(stats.hisenseUnits), "Hisense TVs logged", "#00aaa6");
+  drawShareKpi(ctx, layout.half + layout.gap, y, layout.half, layout.smallHeight, "Hisense Revenue", money(stats.hisenseRevenue), "Hisense TV value", "#00aaa6");
 
   y += layout.smallHeight + layout.gap;
   drawShareKpi(ctx, 0, y, layout.half, layout.smallHeight, "Hisense ASP", money(stats.hisenseAsp), "average selling price", "#00aaa6");
   drawShareKpi(ctx, layout.half + layout.gap, y, layout.half, layout.smallHeight, "Soundbar Sales", String(stats.soundbarUnits), `${money(stats.soundbarRevenue)} soundbar value`, "#00aaa6");
-
-  y += layout.smallHeight + layout.gap;
-  drawSharePremium(ctx, 0, y, layout.width, layout.premiumHeight, stats);
 }
 
 function drawShareKpi(ctx, x, y, width, height, title, value, subtitleText, accent) {
@@ -2332,7 +2293,7 @@ function drawSharePremium(ctx, x, y, width, height, stats) {
   });
 }
 
-function drawShareGauge(ctx, stats, centerX, centerY, width, accent) {
+function drawShareGauge(ctx, stats, centerX, centerY, width) {
   const scale = width / 240;
   const radius = 92 * scale;
   const lineWidth = 16 * scale;
@@ -2344,11 +2305,11 @@ function drawShareGauge(ctx, stats, centerX, centerY, width, accent) {
   ctx.arc(centerX, centerY, radius, percentAngle(0), percentAngle(100));
   ctx.stroke();
 
-  const arcSegments = brandArcSegments(stats);
+  const arcSegments = premiumArcSegments(stats);
   for (const item of arcSegments) {
     ctx.save();
     ctx.lineCap = "butt";
-    ctx.strokeStyle = shareArcGradient(ctx, item.color, centerY - radius, centerY + lineWidth);
+    ctx.strokeStyle = shareArcGradient(ctx, item.hex, centerY - radius, centerY + lineWidth);
     ctx.shadowColor = "rgba(0,0,0,0.34)";
     ctx.shadowBlur = 4 * scale;
     ctx.shadowOffsetY = 3 * scale;
@@ -2358,29 +2319,19 @@ function drawShareGauge(ctx, stats, centerX, centerY, width, accent) {
     ctx.restore();
   }
   drawShareGaugeHighlight(ctx, centerX, centerY, radius, scale);
-  drawShareGaugeMarker(ctx, 10, centerX, centerY, scale);
-  drawShareGaugeMarker(ctx, 20, centerX, centerY, scale);
-  drawShareGaugeLabel(ctx, "10%", 10, centerX, centerY, 116 * scale);
-  drawShareGaugeLabel(ctx, "20%", 20, centerX, centerY, 116 * scale);
-  drawShareGaugeLabel(ctx, "0%", 0, centerX, centerY, 112 * scale, 18 * scale);
-  drawShareGaugeLabel(ctx, "100%", 100, centerX, centerY, 112 * scale, 18 * scale);
-
-  const needle = gaugeCanvasPoint(stats.shareOfValue, centerX, centerY, 76 * scale);
-  ctx.strokeStyle = accent;
-  ctx.lineWidth = 4 * scale;
-  ctx.lineCap = "round";
-  ctx.beginPath();
-  ctx.moveTo(centerX, centerY);
-  ctx.lineTo(needle.x, needle.y);
-  ctx.stroke();
-  ctx.fillStyle = accent;
-  ctx.beginPath();
-  ctx.arc(centerX, centerY, 7 * scale, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = "rgba(255,255,255,0.78)";
-  ctx.lineWidth = 2 * scale;
-  ctx.stroke();
   ctx.restore();
+}
+
+function drawShareGaugeLegend(ctx, stats, x, y, width) {
+  const segments = premiumSegments(stats);
+  const colW = width / segments.length;
+  segments.forEach((item, index) => {
+    const lx = x + index * colW;
+    ctx.fillStyle = item.hex;
+    roundedRect(ctx, lx, y - 8, 9, 9, 3);
+    ctx.fill();
+    drawShareText(ctx, `${item.label} ${item.pct}%`, lx + 14, y, 10, "#9dabc0", 800, colW - 16);
+  });
 }
 
 function drawShareGaugeHighlight(ctx, centerX, centerY, radius, scale) {
@@ -2558,61 +2509,54 @@ function premiumMix(stats) {
   `;
 }
 
-function brandShareBar(stats) {
-  const segments = orderedBrandSegments(stats);
-  const legendSegments = segments.filter((item) => item.value !== 0 || item.brand === "Hisense");
-  const arcSegments = brandArcSegments(stats);
-  const score = Math.max(0, Math.min(100, Number(stats.shareOfValue) || 0));
-  const needle = gaugePoint(score, 76);
-  const marker10 = gaugeMarker(10);
-  const marker20 = gaugeMarker(20);
-  const label10 = gaugePoint(10, 116);
-  const label20 = gaugePoint(20, 116);
+function premiumGauge(stats) {
+  const segments = premiumSegments(stats);
+  const arcSegments = premiumArcSegments(stats);
 
   return `
-    <div class="brand-share" aria-label="Brand share of value">
+    <div class="brand-share" aria-label="Hisense TV mix">
       <div class="brand-share-gauge">
-        <svg viewBox="0 0 240 148" role="img" aria-label="Hisense share of value at ${score}% with brand value mix">
+        <svg viewBox="0 0 240 148" role="img" aria-label="Hisense TV premium mix">
           <defs>
-            ${arcSegments.map(brandShareGradient).join("")}
+            ${arcSegments.map(premiumGaugeGradient).join("")}
           </defs>
           <path class="brand-share-track" d="${gaugeArc(0, 100)}"></path>
-          ${arcSegments.map(brandShareArcSegment).join("")}
+          ${arcSegments.map(premiumGaugeArcSegment).join("")}
           <path class="brand-share-highlight" d="${gaugeArc(0, 100)}"></path>
-          <line class="brand-share-threshold" x1="${marker10.inner.x}" y1="${marker10.inner.y}" x2="${marker10.outer.x}" y2="${marker10.outer.y}"></line>
-          <line class="brand-share-threshold" x1="${marker20.inner.x}" y1="${marker20.inner.y}" x2="${marker20.outer.x}" y2="${marker20.outer.y}"></line>
-          <text class="brand-share-label" x="${label10.x}" y="${label10.y}">10%</text>
-          <text class="brand-share-label" x="${label20.x}" y="${label20.y}">20%</text>
-          <line class="brand-share-needle" x1="120" y1="118" x2="${needle.x}" y2="${needle.y}"></line>
-          <circle class="brand-share-hub" cx="120" cy="118" r="7"></circle>
-          <text class="brand-share-end-label" x="28" y="138">0%</text>
-          <text class="brand-share-end-label" x="212" y="138">100%</text>
         </svg>
-        <div class="brand-share-value">${money(stats.sovHisenseRevenue)} / ${money(stats.sovTotalRevenue)}</div>
+        <div class="brand-share-value">${stats.hisenseUnits} TV${stats.hisenseUnits === 1 ? "" : "s"}</div>
       </div>
       <div class="brand-share-legend">
-        ${legendSegments.map((item) => `<span><i class="swatch" style="background:${item.color}"></i>${esc(item.brand)} ${shareLabel(item.pct)}</span>`).join("")}
+        ${segments.map((item) => `<span><i class="swatch" style="background:${item.hex}"></i>${esc(item.label)} ${shareLabel(item.pct)}</span>`).join("")}
       </div>
     </div>
   `;
 }
 
-function brandShareArcSegment(item) {
-  return `<path class="brand-share-arc-segment" d="${gaugeArc(item.start, item.end)}" stroke="url(#${item.gradientId})" aria-label="${esc(item.brand)} ${shareLabel(item.pct)}"></path>`;
+function premiumGaugeArcSegment(item) {
+  return `<path class="brand-share-arc-segment" d="${gaugeArc(item.start, item.end)}" stroke="url(#${item.gradientId})" aria-label="${esc(item.label)} ${shareLabel(item.pct)}"></path>`;
 }
 
-function brandShareGradient(item) {
+function premiumGaugeGradient(item) {
   return `
     <linearGradient id="${item.gradientId}" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="${adjustHex(item.color, 34)}"></stop>
-      <stop offset="48%" stop-color="${item.color}"></stop>
-      <stop offset="100%" stop-color="${adjustHex(item.color, -42)}"></stop>
+      <stop offset="0%" stop-color="${adjustHex(item.hex, 34)}"></stop>
+      <stop offset="48%" stop-color="${item.hex}"></stop>
+      <stop offset="100%" stop-color="${adjustHex(item.hex, -42)}"></stop>
     </linearGradient>
   `;
 }
 
+function premiumSegments(stats) {
+  const total = Number(stats.premiumTotalRevenue || 0);
+  return PREMIUM.map((item, index) => {
+    const value = Number(stats.premiumRevenue[index] || 0);
+    const pct = total <= 0 ? 0 : (value * 100) / total;
+    return { ...item, value, pct, hex: cssColorValue(item.color) };
+  });
+}
+
 function shareLabel(percent) {
-  if (percent < 0) return "below 0%";
   if (percent > 0 && percent < 1) return `${Math.max(0.1, Math.round(percent * 10) / 10)}%`;
   return `${Math.round(percent)}%`;
 }
@@ -2621,22 +2565,8 @@ function brandColor(brand) {
   return BRAND_COLORS[brand] || BRAND_COLORS.Other;
 }
 
-function orderedBrandSegments(stats) {
-  const total = Number(stats.sovTotalRevenue || 0);
-  const segments = BRANDS.map((brand) => {
-    const value = Number(stats.brandRevenue?.[brand] || 0);
-    const pct = total <= 0 ? (value < 0 ? -1 : 0) : (value * 100) / total;
-    return { brand, value, pct, color: brandColor(brand) };
-  });
-  const hisense = segments.find((item) => item.brand === "Hisense");
-  const others = segments
-    .filter((item) => item.brand !== "Hisense")
-    .sort((left, right) => right.pct - left.pct || BRANDS.indexOf(left.brand) - BRANDS.indexOf(right.brand));
-  return [hisense, ...others].filter(Boolean);
-}
-
-function brandArcSegments(stats) {
-  const visibleSegments = orderedBrandSegments(stats).filter((item) => item.value > 0);
+function premiumArcSegments(stats) {
+  const visibleSegments = premiumSegments(stats).filter((item) => item.value > 0);
   const positiveTotal = visibleSegments.reduce((sum, item) => sum + item.value, 0);
   const arcSegments = [];
   let cursor = 0;
@@ -2677,7 +2607,7 @@ function gaugePoint(percent, radius) {
 function regionCard(region) {
   return `
     <section class="card">
-      <h3>${esc(region.region)} <span class="muted">${region.shareOfValue}% SOV</span></h3>
+      <h3>${esc(region.region)} <span class="muted">${money(region.hisenseRevenue)} TV value</span></h3>
       <div class="metric-row">
         ${metric("Hisense", region.hisenseUnits, `of ${region.totalUnits} units`, "var(--hisense)")}
         ${metric("Value", money(region.hisenseRevenue), `of ${money(region.totalRevenue)}`, "var(--green)")}
