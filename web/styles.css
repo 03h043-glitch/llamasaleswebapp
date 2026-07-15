@@ -312,6 +312,33 @@ h3 {
   margin-top: 5px;
 }
 
+.kpi-compare {
+  display: inline-flex;
+  align-items: center;
+  min-height: 18px;
+  margin-top: 7px;
+  padding: 3px 7px;
+  border-radius: 9px;
+  border: 1px solid color-mix(in srgb, currentColor, transparent 62%);
+  background: color-mix(in srgb, currentColor, transparent 88%);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.kpi-compare.ahead {
+  color: var(--green);
+}
+
+.kpi-compare.behind {
+  color: var(--red);
+}
+
+.kpi-compare.neutral {
+  color: var(--muted);
+}
+
 .sov-card {
   min-height: 258px;
 }

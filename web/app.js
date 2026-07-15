@@ -93,8 +93,8 @@ const SKU_DATA = {
   }
 };
 const APP_BUILD = {
-  version: "v35",
-  baseCommit: "b95a390",
+  version: "v36",
+  baseCommit: "7c280bd",
   repo: "03h043-glitch/llamasaleswebapp"
 };
 const DEFAULT_APPEARANCE = { theme: "dark", palette: "default" };
@@ -167,7 +167,7 @@ const state = {
   meta: readJson(KEY.meta, { regions: REGIONS, storesByRegion: {}, models: MODELS, soundbarModels: SOUNDBAR_MODELS, sizes: SIZES, modelCategories: DEFAULT_MODEL_CATEGORIES, skus: SKU_DATA }),
   filters: { timeframe: "Today", scope: "Store" },
   salesDay: todayIso(),
-  salesSort: "time",
+  salesSort: "size",
   editSaleId: "",
   barcodeFormOpen: false,
   barcodeEditId: "",
@@ -250,7 +250,7 @@ app.addEventListener("click", async (event) => {
   } else if (action === "sales-day") {
     changeSalesDay(value);
   } else if (action === "sales-sort") {
-    state.salesSort = value || "time";
+    state.salesSort = value === "type" ? "type" : "size";
     render();
   } else if (action === "edit-sale") {
     state.editSaleId = state.editSaleId === value ? "" : value;
@@ -617,6 +617,8 @@ function renderServerPanel(forceForm = false) {
 
 function renderDashboard(account) {
   const stats = dashboardStats(account, state.filters.timeframe, state.filters.scope);
+  const average = dashboardAverageStats(account, state.filters.timeframe, state.filters.scope);
+  const comparisons = dashboardComparisons(stats, average);
   return `
     <div class="segmented dashboard-filters">
       <div class="seg-row four">${TIMEFRAMES.map((time) => buttonSeg("filter-time", time, shortTime(time), state.filters.timeframe === time)).join("")}</div>
@@ -626,10 +628,10 @@ function renderDashboard(account) {
     <div class="dashboard-card-crop">
       <div class="grid">
         ${kpi("Premium Mix", money(stats.hisenseRevenue), `${stats.hisenseUnits} Hisense TV${stats.hisenseUnits === 1 ? "" : "s"}`, DASHBOARD_ACCENT, "span-4 large sov-card", premiumGauge(stats))}
-        ${kpi("Hisense Units", stats.hisenseUnits, "Hisense TVs logged", DASHBOARD_ACCENT, "span-2")}
-        ${kpi("Hisense Revenue", money(stats.hisenseRevenue), "Hisense TV value", DASHBOARD_ACCENT, "span-2")}
-        ${kpi("Hisense ASP", money(stats.hisenseAsp), "average selling price", DASHBOARD_ACCENT, "span-2")}
-        ${kpi("Soundbar Sales", stats.soundbarUnits, `${money(stats.soundbarRevenue)} soundbar value`, DASHBOARD_ACCENT, "span-2")}
+        ${kpi("Hisense Units", stats.hisenseUnits, "Hisense TVs logged", DASHBOARD_ACCENT, "span-2", "", comparisons.units)}
+        ${kpi("Hisense Revenue", money(stats.hisenseRevenue), "Hisense TV value", DASHBOARD_ACCENT, "span-2", "", comparisons.revenue)}
+        ${kpi("Hisense ASP", money(stats.hisenseAsp), "average selling price", DASHBOARD_ACCENT, "span-2", "", comparisons.asp)}
+        ${kpi("Soundbar Sales", stats.soundbarUnits, `${money(stats.soundbarRevenue)} soundbar value`, DASHBOARD_ACCENT, "span-2", "", comparisons.soundbars)}
       </div>
 
       ${buildMarker()}
@@ -695,11 +697,9 @@ function renderTodaysSales(account) {
       </div>
     </div>
     <div class="segmented compact-tabs">
-      <div class="seg-row four">
-        ${buttonSeg("sales-sort", "time", "Time", state.salesSort === "time")}
-        ${buttonSeg("sales-sort", "brand", "Brand", state.salesSort === "brand")}
-        ${buttonSeg("sales-sort", "value", "Value", state.salesSort === "value")}
-        ${buttonSeg("sales-sort", "model", "Model", state.salesSort === "model")}
+      <div class="seg-row two">
+        ${buttonSeg("sales-sort", "size", "Size", state.salesSort !== "type")}
+        ${buttonSeg("sales-sort", "type", "Type", state.salesSort === "type")}
       </div>
     </div>
     <section class="card sales-table-card">
@@ -724,17 +724,40 @@ function sortedSalesForDay(account, day) {
     const saleDate = parseIsoDate(sale.date);
     return sale.brand === "Hisense" && saleDate && belongsTo(sale, account) && sameDate(saleDate, day);
   });
-  if (state.salesSort === "brand") return rows.sort(compareSalesByBrandThenSize);
-  if (state.salesSort === "value") return rows.sort((a, b) => Number(b.price || 0) - Number(a.price || 0));
-  if (state.salesSort === "model") return rows.sort((a, b) => saleName(a).localeCompare(saleName(b)));
-  return rows.sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+  if (state.salesSort === "type") return rows.sort(compareSalesByType);
+  return rows.sort(compareSalesBySize);
 }
 
-function compareSalesByBrandThenSize(a, b) {
-  return a.brand.localeCompare(b.brand, undefined, { sensitivity: "base" })
+function compareSalesBySize(a, b) {
+  return compareSaleTvSize(a, b)
+    || compareSaleTypeOnly(a, b)
+    || saleName(a).localeCompare(saleName(b), undefined, { sensitivity: "base", numeric: true })
+    || Number(b.createdAt || 0) - Number(a.createdAt || 0);
+}
+
+function compareSalesByType(a, b) {
+  return compareSaleTypeOnly(a, b)
     || compareSaleTvSize(a, b)
     || saleName(a).localeCompare(saleName(b), undefined, { sensitivity: "base", numeric: true })
     || Number(b.createdAt || 0) - Number(a.createdAt || 0);
+}
+
+function compareSaleTypeOnly(a, b) {
+  return saleTypeOrder(saleSortType(a)) - saleTypeOrder(saleSortType(b));
+}
+
+function saleSortType(sale) {
+  if (saleIsRefund(sale)) return "REFUND";
+  if (saleItemType(sale) === "soundbar") return "SOUNDBAR";
+  return modelCategory(sale.model) || "OTHER";
+}
+
+function saleTypeOrder(type) {
+  const premium = PRODUCT_TYPES.indexOf(type);
+  if (premium >= 0) return premium;
+  if (type === "SOUNDBAR") return PRODUCT_TYPES.length;
+  if (type === "OTHER") return PRODUCT_TYPES.length + 1;
+  return PRODUCT_TYPES.length + 2;
 }
 
 function compareSaleTvSize(a, b) {
@@ -1889,7 +1912,16 @@ function normalizeModelCategories(categories) {
 }
 
 function dashboardStats(account, timeframe, scope) {
-  const stats = {
+  const stats = blankDashboardStats();
+  for (const sale of state.sales) {
+    if (!inScope(sale, account, scope) || !inTimeframe(sale, timeframe)) continue;
+    addSaleToDashboardStats(stats, sale);
+  }
+  return finalizeDashboardStats(stats);
+}
+
+function blankDashboardStats() {
+  return {
     totalUnits: 0,
     hisenseUnits: 0,
     soundbarUnits: 0,
@@ -1900,29 +1932,144 @@ function dashboardStats(account, timeframe, scope) {
     premiumTotalRevenue: 0,
     premiumRevenue: [0, 0, 0, 0, 0]
   };
-  for (const sale of state.sales) {
-    if (!inScope(sale, account, scope) || !inTimeframe(sale, timeframe)) continue;
-    if (sale.brand !== "Hisense") continue;
-    if (saleIsRefund(sale)) continue;
-    const itemType = saleItemType(sale);
-    const saleValue = Number(sale.price || 0);
-    if (itemType === "soundbar") {
-      stats.soundbarUnits += 1;
-      stats.soundbarRevenue += saleValue;
-      continue;
-    }
-    stats.totalUnits += 1;
-    stats.totalRevenue += saleValue;
-    stats.hisenseUnits += 1;
-    stats.hisenseRevenue += saleValue;
-    const index = premiumIndex(sale.model);
-    if (index >= 0) {
-      stats.premiumRevenue[index] += saleValue;
-      stats.premiumTotalRevenue += saleValue;
-    }
+}
+
+function addSaleToDashboardStats(stats, sale) {
+  if (sale.brand !== "Hisense") return;
+  if (saleIsRefund(sale)) return;
+  const itemType = saleItemType(sale);
+  const saleValue = Number(sale.price || 0);
+  if (itemType === "soundbar") {
+    stats.soundbarUnits += 1;
+    stats.soundbarRevenue += saleValue;
+    return;
   }
+  stats.totalUnits += 1;
+  stats.totalRevenue += saleValue;
+  stats.hisenseUnits += 1;
+  stats.hisenseRevenue += saleValue;
+  const index = premiumIndex(sale.model);
+  if (index >= 0) {
+    stats.premiumRevenue[index] += saleValue;
+    stats.premiumTotalRevenue += saleValue;
+  }
+}
+
+function finalizeDashboardStats(stats) {
   stats.hisenseAsp = stats.hisenseUnits <= 0 ? 0 : stats.hisenseRevenue / stats.hisenseUnits;
   return stats;
+}
+
+function addDashboardStats(target, source, multiplier = 1) {
+  target.totalUnits += Number(source.totalUnits || 0) * multiplier;
+  target.hisenseUnits += Number(source.hisenseUnits || 0) * multiplier;
+  target.soundbarUnits += Number(source.soundbarUnits || 0) * multiplier;
+  target.totalRevenue += Number(source.totalRevenue || 0) * multiplier;
+  target.hisenseRevenue += Number(source.hisenseRevenue || 0) * multiplier;
+  target.soundbarRevenue += Number(source.soundbarRevenue || 0) * multiplier;
+  target.premiumTotalRevenue += Number(source.premiumTotalRevenue || 0) * multiplier;
+  source.premiumRevenue?.forEach((value, index) => {
+    target.premiumRevenue[index] += Number(value || 0) * multiplier;
+  });
+}
+
+function dashboardAverageStats(account, timeframe, scope) {
+  const today = dateOnly(new Date());
+  const averages = weekdayAverageDashboardStats(account, scope, today);
+  const targetDates = dashboardTargetDates(timeframe, today);
+  const stats = blankDashboardStats();
+  let matchedDays = 0;
+
+  for (const targetDate of targetDates) {
+    const average = averages[targetDate.getDay()];
+    if (!average?.sampleDays) continue;
+    addDashboardStats(stats, average);
+    matchedDays += 1;
+  }
+
+  finalizeDashboardStats(stats);
+  stats.hasAverage = matchedDays > 0;
+  stats.label = averageComparisonLabel(timeframe, today);
+  stats.emptyLabel = emptyAverageLabel(timeframe, today);
+  return stats;
+}
+
+function weekdayAverageDashboardStats(account, scope, beforeDate) {
+  const daily = new Map();
+  let firstDate = null;
+
+  for (const sale of state.sales) {
+    const saleDate = parseIsoDate(sale.date);
+    if (!saleDate || saleDate >= beforeDate) continue;
+    if (!inScope(sale, account, scope)) continue;
+    if (sale.brand !== "Hisense" || saleIsRefund(sale)) continue;
+    if (!firstDate || saleDate < firstDate) firstDate = saleDate;
+    const key = localIsoDate(saleDate);
+    if (!daily.has(key)) daily.set(key, blankDashboardStats());
+    addSaleToDashboardStats(daily.get(key), sale);
+  }
+
+  const totals = Array.from({ length: 7 }, () => ({ stats: blankDashboardStats(), sampleDays: 0 }));
+  if (!firstDate) return totals.map((item) => ({ ...item.stats, sampleDays: 0 }));
+
+  for (let cursor = dateOnly(firstDate); cursor < beforeDate; cursor = addDays(cursor, 1)) {
+    const bucket = totals[cursor.getDay()];
+    addDashboardStats(bucket.stats, daily.get(localIsoDate(cursor)) || blankDashboardStats());
+    bucket.sampleDays += 1;
+  }
+
+  return totals.map((item) => {
+    const average = blankDashboardStats();
+    if (item.sampleDays > 0) addDashboardStats(average, item.stats, 1 / item.sampleDays);
+    finalizeDashboardStats(average);
+    average.sampleDays = item.sampleDays;
+    return average;
+  });
+}
+
+function dashboardTargetDates(timeframe, today) {
+  let start = today;
+  if (timeframe === "This Week") start = retailWeekStart(today);
+  if (timeframe === "Month to Date") start = new Date(today.getFullYear(), today.getMonth(), 1);
+  if (timeframe === "Year to Date") start = new Date(today.getFullYear(), 0, 1);
+  const dates = [];
+  for (let cursor = dateOnly(start); cursor <= today; cursor = addDays(cursor, 1)) {
+    dates.push(dateOnly(cursor));
+  }
+  return dates;
+}
+
+function dashboardComparisons(stats, average) {
+  return {
+    units: averageIndicator(stats.hisenseUnits, average.hisenseUnits, formatCount, average),
+    revenue: averageIndicator(stats.hisenseRevenue, average.hisenseRevenue, money, average),
+    asp: averageIndicator(stats.hisenseAsp, average.hisenseAsp, money, average),
+    soundbars: averageIndicator(stats.soundbarUnits, average.soundbarUnits, formatCount, average)
+  };
+}
+
+function averageIndicator(current, averageValue, formatter, average) {
+  if (!average.hasAverage) return { tone: "neutral", text: average.emptyLabel };
+  const delta = Number(current || 0) - Number(averageValue || 0);
+  const epsilon = 0.05;
+  if (Math.abs(delta) <= epsilon) return { tone: "neutral", text: `On ${average.label}` };
+  const direction = delta > 0 ? "ahead" : "behind";
+  const sign = delta > 0 ? "+" : "-";
+  return { tone: direction, text: `${sign}${formatter(Math.abs(delta))} ${direction} ${average.label}` };
+}
+
+function averageComparisonLabel(timeframe, today) {
+  if (timeframe === "Today") return `vs avg ${weekdayShort(today)}`;
+  return "vs weekday avg";
+}
+
+function emptyAverageLabel(timeframe, today) {
+  if (timeframe === "Today") return `No avg ${weekdayShort(today)} yet`;
+  return "No weekday avg yet";
+}
+
+function weekdayShort(date) {
+  return date.toLocaleDateString("en-GB", { weekday: "short" });
 }
 
 function commissionStats(account) {
@@ -2176,6 +2323,8 @@ async function shareDashboard() {
 async function dashboardImageFile(account) {
   if (document.fonts?.ready) await document.fonts.ready;
   const stats = dashboardStats(account, state.filters.timeframe, state.filters.scope);
+  const average = dashboardAverageStats(account, state.filters.timeframe, state.filters.scope);
+  const comparisons = dashboardComparisons(stats, average);
   const layout = dashboardShareLayout();
   const scale = Math.min(3, Math.max(2, window.devicePixelRatio || 2));
   const canvas = document.createElement("canvas");
@@ -2184,7 +2333,7 @@ async function dashboardImageFile(account) {
   const context = canvas.getContext("2d");
   if (!context) throw new Error("Canvas is unavailable");
   context.scale(scale, scale);
-  drawDashboardShareImage(context, layout, stats);
+  drawDashboardShareImage(context, layout, stats, comparisons);
   const blob = await canvasBlob(canvas);
   return new File([blob], `llamasales-dashboard-${todayIso()}.png`, { type: "image/png" });
 }
@@ -2221,7 +2370,7 @@ function dashboardShareLayout() {
   return { width, height, gap, half, sovHeight, smallHeight };
 }
 
-function drawDashboardShareImage(ctx, layout, stats) {
+function drawDashboardShareImage(ctx, layout, stats, comparisons = {}) {
   ctx.clearRect(0, 0, layout.width, layout.height);
   let y = 0;
   drawShareCard(ctx, 0, y, layout.width, layout.sovHeight, "#00aaa6");
@@ -2233,19 +2382,20 @@ function drawDashboardShareImage(ctx, layout, stats) {
   drawShareGaugeLegend(ctx, stats, 14, y + layout.sovHeight - 14, layout.width - 28);
 
   y += layout.sovHeight + layout.gap;
-  drawShareKpi(ctx, 0, y, layout.half, layout.smallHeight, "Hisense Units", String(stats.hisenseUnits), "Hisense TVs logged", "#00aaa6");
-  drawShareKpi(ctx, layout.half + layout.gap, y, layout.half, layout.smallHeight, "Hisense Revenue", money(stats.hisenseRevenue), "Hisense TV value", "#00aaa6");
+  drawShareKpi(ctx, 0, y, layout.half, layout.smallHeight, "Hisense Units", String(stats.hisenseUnits), "Hisense TVs logged", "#00aaa6", comparisons.units);
+  drawShareKpi(ctx, layout.half + layout.gap, y, layout.half, layout.smallHeight, "Hisense Revenue", money(stats.hisenseRevenue), "Hisense TV value", "#00aaa6", comparisons.revenue);
 
   y += layout.smallHeight + layout.gap;
-  drawShareKpi(ctx, 0, y, layout.half, layout.smallHeight, "Hisense ASP", money(stats.hisenseAsp), "average selling price", "#00aaa6");
-  drawShareKpi(ctx, layout.half + layout.gap, y, layout.half, layout.smallHeight, "Soundbar Sales", String(stats.soundbarUnits), `${money(stats.soundbarRevenue)} soundbar value`, "#00aaa6");
+  drawShareKpi(ctx, 0, y, layout.half, layout.smallHeight, "Hisense ASP", money(stats.hisenseAsp), "average selling price", "#00aaa6", comparisons.asp);
+  drawShareKpi(ctx, layout.half + layout.gap, y, layout.half, layout.smallHeight, "Soundbar Sales", String(stats.soundbarUnits), `${money(stats.soundbarRevenue)} soundbar value`, "#00aaa6", comparisons.soundbars);
 }
 
-function drawShareKpi(ctx, x, y, width, height, title, value, subtitleText, accent) {
+function drawShareKpi(ctx, x, y, width, height, title, value, subtitleText, accent, comparison = null) {
   drawShareCard(ctx, x, y, width, height, accent);
   drawShareText(ctx, title, x + 14, y + 29, 12, "#9dabc0", 800);
-  drawShareText(ctx, value, x + 14, y + 67, 29, accent, 900, width - 28);
-  drawShareText(ctx, subtitleText, x + 14, y + 92, 12, "#9dabc0", 500, width - 28);
+  drawShareText(ctx, value, x + 14, y + 62, 27, accent, 900, width - 28);
+  drawShareText(ctx, subtitleText, x + 14, y + 86, 11, "#9dabc0", 500, width - 28);
+  if (comparison) drawShareText(ctx, comparison.text, x + 14, y + 108, 10, shareComparisonColor(comparison), 800, width - 28);
 }
 
 function drawSharePremium(ctx, x, y, width, height, stats) {
@@ -2618,13 +2768,15 @@ function regionCard(region) {
   `;
 }
 
-function kpi(title, value, subtitleText, accent, extraClass = "", extra = "") {
+function kpi(title, value, subtitleText, accent, extraClass = "", extra = "", comparison = null) {
   const subtitle = subtitleText ? `<div class="kpi-sub">${esc(subtitleText)}</div>` : "";
+  const benchmark = comparison ? `<div class="kpi-compare ${esc(comparison.tone)}">${esc(comparison.text)}</div>` : "";
   return `
     <section class="card kpi ${extraClass}" style="--accent:${accent}">
       <div class="kpi-title">${esc(title)}</div>
       <div class="kpi-value">${esc(String(value))}</div>
       ${subtitle}
+      ${benchmark}
       ${extra}
     </section>
   `;
@@ -2782,6 +2934,17 @@ function saleName(sale) {
 
 function money(value) {
   return `GBP ${Number(value || 0).toLocaleString("en-GB", { maximumFractionDigits: 0 })}`;
+}
+
+function formatCount(value) {
+  const rounded = Math.round(Number(value || 0) * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}
+
+function shareComparisonColor(comparison) {
+  if (comparison?.tone === "ahead") return "#1cb973";
+  if (comparison?.tone === "behind") return "#ec4a4a";
+  return "#9dabc0";
 }
 
 function shortTime(value) {
