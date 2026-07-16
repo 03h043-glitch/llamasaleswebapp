@@ -52,6 +52,7 @@ const OTHER_HISENSE_COMMISSION = 5;
 const PRODUCTION_DOMAIN = "tiredllama.co.uk";
 const PRODUCTION_API_URL = "https://api.tiredllama.co.uk";
 const ADD_NEW_STORE = "__add_new_store__";
+const ACCOUNT_CREATION_SECRET = "C2ULTRA!";
 const DASHBOARD_ACCENT = "var(--hisense)";
 const BRAND_COLORS = {
   Hisense: "#00aaa6",
@@ -93,8 +94,8 @@ const SKU_DATA = {
   }
 };
 const APP_BUILD = {
-  version: "v36",
-  baseCommit: "7c280bd",
+  version: "v37",
+  baseCommit: "2bcdd0f",
   repo: "03h043-glitch/llamasaleswebapp"
 };
 const DEFAULT_APPEARANCE = { theme: "dark", palette: "default" };
@@ -150,6 +151,8 @@ const KEY = {
   lastSync: "llamasales.pwa.lastSync"
 };
 
+const initialSession = readJson(KEY.session, null);
+
 const state = {
   page: "dashboard",
   authMode: "login",
@@ -163,7 +166,7 @@ const state = {
   rates: readJson(KEY.rates, {}),
   rateHistory: readJson(KEY.rateHistory, []),
   barcodes: readJson(KEY.barcodes, []),
-  session: readJson(KEY.session, null),
+  session: initialSession,
   meta: readJson(KEY.meta, { regions: REGIONS, storesByRegion: {}, models: MODELS, soundbarModels: SOUNDBAR_MODELS, sizes: SIZES, modelCategories: DEFAULT_MODEL_CATEGORIES, skus: SKU_DATA }),
   filters: { timeframe: "Today", scope: "Store" },
   salesDay: todayIso(),
@@ -178,6 +181,7 @@ const state = {
   selectedPayPeriod: "",
   ui: readJson(KEY.ui, { commissionFloatHidden: false, commissionFloatX: null, commissionFloatY: null }),
   preferences: readJson(KEY.preferences, {}),
+  verifyingSession: Boolean(initialSession?.passwordHash),
   userPanelOpen: false,
   repoCommit: "",
   toast: ""
@@ -192,6 +196,7 @@ if ("serviceWorker" in navigator) {
 render();
 loadMeta();
 loadRepoCommit();
+verifyStoredSession();
 syncDaily();
 
 app.addEventListener("click", async (event) => {
@@ -221,26 +226,11 @@ app.addEventListener("click", async (event) => {
     if (PALETTES.some((palette) => palette.id === value)) saveAppearance({ palette: value });
     render();
   } else if (action === "page") {
-    state.page = value;
-    state.menuOpen = false;
-    state.userPanelOpen = false;
-    render();
-    if (value === "commission" || value === "barcodes") {
-      await loadMeta();
-      render();
-    }
-    if (value === "commission") {
-      await syncNow(false);
-    }
+    await navigateToPage(value);
   } else if (action === "dashboard") {
-    goDashboard();
+    await goDashboard();
   } else if (action === "sign-out") {
-    state.session = null;
-    state.asmUnlocked = false;
-    state.userPanelOpen = false;
-    writeJson(KEY.session, null);
-    state.menuOpen = false;
-    render();
+    invalidateSession("");
   } else if (action === "filter-time") {
     state.filters.timeframe = value;
     render();
@@ -302,13 +292,9 @@ app.addEventListener("click", async (event) => {
     render();
     await syncNow(true);
   } else if (action === "asm") {
-    state.menuOpen = false;
-    state.page = "asm";
-    render();
+    await navigateToPage("asm");
   } else if (action === "commission-config") {
-    state.menuOpen = false;
-    state.page = "config";
-    render();
+    await navigateToPage("config");
   }
 });
 
@@ -376,7 +362,24 @@ app.addEventListener("submit", async (event) => {
 function render() {
   const account = currentAccount();
   applyAppearance(account);
+  if (state.verifyingSession) {
+    app.innerHTML = renderSessionCheck();
+    return;
+  }
   app.innerHTML = account ? renderShell(account) : renderAuth();
+}
+
+function renderSessionCheck() {
+  return `
+    <main class="app">
+      <section class="auth-shell stack">
+        <div>
+          <h1>LlamaSales</h1>
+          <p class="muted">Checking account access...</p>
+        </div>
+      </section>
+    </main>
+  `;
 }
 
 function renderAuth() {
@@ -439,6 +442,10 @@ function renderRegisterForm() {
       <div class="field">
         <label>Confirm Password</label>
         <input name="confirm" type="password" autocomplete="new-password" minlength="8" required>
+      </div>
+      <div class="field">
+        <label>Account Creation Secret</label>
+        <input name="signupSecret" type="password" autocomplete="off" required>
       </div>
       <div class="field">
         <label>Region</label>
@@ -1252,16 +1259,7 @@ async function handleLogin(data) {
     render();
     return;
   } catch (error) {
-    const cached = state.users.find((user) => user.username.toLowerCase() === username.toLowerCase());
-    if (!cached || cached.passwordHash !== passwordHash) {
-      toast(error.message || "Username or password is incorrect.");
-      return;
-    }
-    state.session = { username: cached.username, passwordHash, account: cached };
-    writeJson(KEY.session, state.session);
-    state.page = "dashboard";
-    toast("Signed in offline.");
-    render();
+    toast(error.message || "Username or password is incorrect.");
   }
 }
 
@@ -1270,6 +1268,7 @@ async function handleRegister(data) {
   const email = String(data.email || "").trim();
   const password = String(data.password || "");
   const confirm = String(data.confirm || "");
+  const signupSecret = String(data.signupSecret || "");
   const region = canonicalRegion(data.region || "");
   const store = data.storeChoice === ADD_NEW_STORE ? String(data.newStore || "").trim() : String(data.storeChoice || "").trim();
 
@@ -1289,10 +1288,14 @@ async function handleRegister(data) {
     toast("Passwords do not match.");
     return;
   }
+  if (signupSecret !== ACCOUNT_CREATION_SECRET) {
+    toast("Account creation secret is incorrect.");
+    return;
+  }
 
   try {
     const passwordHash = await sha256(password);
-    const payload = await apiPost("/api/register", { username, email, region, store, passwordHash });
+    const payload = await apiPost("/api/register", { username, email, region, store, passwordHash, signupSecret });
     applyServerPayload(payload);
     applyMetaPayload(payload.meta);
     const account = payload.account;
@@ -1557,9 +1560,18 @@ async function saveRate(data) {
 }
 
 async function syncDaily() {
+  if (state.verifyingSession) return;
   const today = todayIso();
   if (state.apiUrl && state.session?.passwordHash && localStorage.getItem(KEY.lastSync) !== today) {
     await syncNow(false);
+  }
+}
+
+async function verifyStoredSession() {
+  if (!state.session?.passwordHash) return;
+  if (await verifyCurrentSession(false)) {
+    state.verifyingSession = false;
+    render();
   }
 }
 
@@ -1603,6 +1615,10 @@ async function syncNow(showResult) {
     applyServerPayload(payload);
     if (showResult) toast("Sync complete.");
   } catch (error) {
+    if (error.status === 401) {
+      invalidateSession("Account no longer active. Sign in again.");
+      return;
+    }
     if (showResult) toast(`Sync failed: ${error.message}`);
   } finally {
     state.syncInProgress = false;
@@ -1623,7 +1639,9 @@ async function apiPost(path, payload) {
     body = null;
   }
   if (!response.ok || !body?.ok) {
-    throw new Error(body?.error || `HTTP ${response.status}`);
+    const error = new Error(body?.error || `HTTP ${response.status}`);
+    error.status = response.status;
+    throw error;
   }
   return body;
 }
@@ -1637,9 +1655,66 @@ async function apiGet(path) {
     body = null;
   }
   if (!response.ok || !body?.ok) {
-    throw new Error(body?.error || `HTTP ${response.status}`);
+    const error = new Error(body?.error || `HTTP ${response.status}`);
+    error.status = response.status;
+    throw error;
   }
   return body;
+}
+
+async function navigateToPage(page) {
+  if (!await verifyCurrentSession(true)) return;
+  state.page = page;
+  state.menuOpen = false;
+  state.userPanelOpen = false;
+  render();
+  if (page === "commission" || page === "barcodes") {
+    await loadMeta();
+    render();
+  }
+  if (page === "commission") {
+    await syncNow(false);
+  }
+}
+
+async function verifyCurrentSession(showToast) {
+  if (!state.session?.passwordHash || !state.apiUrl) {
+    invalidateSession(showToast ? "Sign in to continue." : "");
+    return false;
+  }
+  try {
+    const payload = await apiPost("/api/login", authPayload());
+    applyServerPayload(payload);
+    return true;
+  } catch (error) {
+    invalidateSession(error.status === 401 ? "Account no longer active. Sign in again." : "Could not verify account. Sign in again.");
+    return false;
+  }
+}
+
+function invalidateSession(message = "") {
+  state.session = null;
+  state.users = [];
+  state.sales = [];
+  state.deletedSales = [];
+  state.rates = {};
+  state.rateHistory = [];
+  state.barcodes = [];
+  state.asmUnlocked = false;
+  state.verifyingSession = false;
+  state.menuOpen = false;
+  state.userPanelOpen = false;
+  state.page = "dashboard";
+  writeJson(KEY.session, null);
+  writeJson(KEY.users, state.users);
+  writeJson(KEY.sales, state.sales);
+  writeJson(KEY.deletedSales, state.deletedSales);
+  writeJson(KEY.rates, state.rates);
+  writeJson(KEY.rateHistory, state.rateHistory);
+  writeJson(KEY.barcodes, state.barcodes);
+  localStorage.removeItem(KEY.lastSync);
+  if (message) toast(message);
+  render();
 }
 
 function authPayload() {
@@ -2278,7 +2353,8 @@ function saleIsRefund(sale) {
   return value === true || value === 1 || value === "1" || String(value || "").toLowerCase() === "true" || String(value || "").toLowerCase() === "on";
 }
 
-function goDashboard() {
+async function goDashboard() {
+  if (!await verifyCurrentSession(true)) return;
   state.page = "dashboard";
   state.menuOpen = false;
   state.userPanelOpen = false;

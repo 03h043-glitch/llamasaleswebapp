@@ -7,6 +7,7 @@ const REGIONS = [
 const TV_MODELS = ["A4Q", "A5Q", "A6Q", "A7Q", "E7Q", "E7Q Pro", "U7Q", "U7Q Pro", "U8Q", "U7S", "U7S Pro", "UR8S", "UR9S", "C2", "C2 Ultra", "Other"];
 const SOUNDBAR_MODELS = ["AX3100Q", "AX5100Q", "AX5125H", "AX5125Q", "AX7100Q", "AX8100Q", "Other"];
 const SIZES = ["32", "40", "43", "50", "55", "65", "75", "85", "100", "Other"];
+const ACCOUNT_CREATION_SECRET = "C2ULTRA!";
 const PRODUCT_TYPES = ["UHD", "QLED", "MINI LED", "RGB", "LASER"];
 const DEFAULT_MODEL_CATEGORIES = {
   A4Q: "UHD",
@@ -88,6 +89,9 @@ async function handleApi(request, env, url) {
     const region = canonicalRegion(body.region);
     const store = clean(body.store);
     const passwordHash = clean(body.passwordHash).toLowerCase();
+    if (String(body.signupSecret || "") !== ACCOUNT_CREATION_SECRET) {
+      return json({ ok: false, error: "Account creation secret is incorrect" }, request, 403);
+    }
     const validation = validateUser(username, email, region, store, passwordHash);
     if (validation) return json({ ok: false, error: validation }, request, 400);
 
