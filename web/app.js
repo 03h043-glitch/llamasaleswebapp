@@ -94,8 +94,8 @@ const SKU_DATA = {
   }
 };
 const APP_BUILD = {
-  version: "v38",
-  baseCommit: "20bde11",
+  version: "v39",
+  baseCommit: "6db7f99",
   repo: "03h043-glitch/llamasaleswebapp"
 };
 const DEFAULT_APPEARANCE = { theme: "dark", palette: "default" };
@@ -533,7 +533,6 @@ function renderMenu() {
         <button class="button secondary" data-action="page" data-value="settings">Server sync</button>
         <button class="button secondary" data-action="page" data-value="add">Add sale</button>
         <button class="button secondary" data-action="share">Share dashboard</button>
-        <button class="button danger" data-action="sign-out">Sign out</button>
         <button class="button secondary" data-action="close-menu">Close</button>
       </div>
     </div>
