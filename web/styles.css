@@ -911,6 +911,10 @@ select:disabled {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--blue), transparent 35%);
 }
 
+.user-signout {
+  width: 100%;
+}
+
 .palette-swatch {
   display: inline-block;
   width: 28px;

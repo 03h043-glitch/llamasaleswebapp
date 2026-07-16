@@ -94,8 +94,8 @@ const SKU_DATA = {
   }
 };
 const APP_BUILD = {
-  version: "v37",
-  baseCommit: "2bcdd0f",
+  version: "v38",
+  baseCommit: "20bde11",
   repo: "03h043-glitch/llamasaleswebapp"
 };
 const DEFAULT_APPEARANCE = { theme: "dark", palette: "default" };
@@ -564,6 +564,7 @@ function renderUserPanel(account) {
           ${PALETTES.map((palette) => paletteButton(palette, prefs.palette === palette.id)).join("")}
         </div>
       </div>
+      <button class="button danger user-signout" data-action="sign-out">Sign out</button>
     </section>
   `;
 }
