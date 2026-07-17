@@ -84,6 +84,15 @@ async function handleApi(request, env, url) {
     return json(await publicMeta(db), request);
   }
 
+  if (request.method === "POST" && url.pathname === "/api/repair/primary-sales") {
+    const body = await request.json();
+    if (String(body.repairSecret || "") !== ACCOUNT_CREATION_SECRET) {
+      return json({ ok: false, error: "Repair secret is incorrect" }, request, 403);
+    }
+    const repair = await forceAssignCurrentSalesToPrimaryAccount(db);
+    return json({ ok: true, ...repair }, request);
+  }
+
   if (request.method === "POST" && url.pathname === "/api/register") {
     const body = await request.json();
     const username = clean(body.username);
@@ -826,6 +835,29 @@ async function assignUnlocatedSalesToPrimaryAccount(db) {
       )
   `).bind(user.username, user.region, user.store).run();
   return Number(result?.meta?.changes || 0);
+}
+
+async function forceAssignCurrentSalesToPrimaryAccount(db) {
+  const user = await getUser(db, PRIMARY_ACCOUNT_USERNAME);
+  if (!user) return { repaired: 0, skipped: "Primary account does not exist" };
+  const userCount = await count(db, "users");
+  if (userCount !== 1) return { repaired: 0, skipped: "Repair only runs while 03h043 is the only backend user" };
+  const result = await db.prepare(`
+    UPDATE sales
+    SET username=?, region=?, store=?
+    WHERE brand='Hisense'
+      AND (
+        lower(trim(username)) <> lower(?)
+        OR trim(region) <> ?
+        OR trim(store) <> ?
+      )
+  `).bind(user.username, user.region, user.store, user.username, user.region, user.store).run();
+  const counts = await salesUsernameCounts(db);
+  return { repaired: Number(result?.meta?.changes || 0), assignedTo: user.username, region: user.region, store: user.store, salesByUsername: counts };
+}
+
+async function salesUsernameCounts(db) {
+  return all(db, "SELECT username, region, store, COUNT(*) count FROM sales WHERE brand='Hisense' GROUP BY username, region, store ORDER BY count DESC, username");
 }
 
 async function upsertSale(db, sale) {
