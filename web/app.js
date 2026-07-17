@@ -94,8 +94,8 @@ const SKU_DATA = {
   }
 };
 const APP_BUILD = {
-  version: "v39",
-  baseCommit: "6db7f99",
+  version: "v40",
+  baseCommit: "3bed8a9",
   repo: "03h043-glitch/llamasaleswebapp"
 };
 const DEFAULT_APPEARANCE = { theme: "dark", palette: "default" };
@@ -2221,13 +2221,12 @@ function finishRegion(region) {
 
 function inScope(sale, account, scope) {
   if (!account) return false;
-  if (!sale.username) return true;
   if (scope === "Region") return canonicalRegion(sale.region).toLowerCase() === canonicalRegion(account.region).toLowerCase();
   return canonicalRegion(sale.region).toLowerCase() === canonicalRegion(account.region).toLowerCase() && String(sale.store || "").toLowerCase() === String(account.store || "").toLowerCase();
 }
 
 function belongsTo(sale, account) {
-  return account && (!sale.username || String(sale.username).toLowerCase() === String(account.username).toLowerCase());
+  return Boolean(account && sale.username && String(sale.username).toLowerCase() === String(account.username).toLowerCase());
 }
 
 function saleItemType(sale) {

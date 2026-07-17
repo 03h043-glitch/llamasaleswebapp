@@ -8,6 +8,7 @@ const TV_MODELS = ["A4Q", "A5Q", "A6Q", "A7Q", "E7Q", "E7Q Pro", "U7Q", "U7Q Pro
 const SOUNDBAR_MODELS = ["AX3100Q", "AX5100Q", "AX5125H", "AX5125Q", "AX7100Q", "AX8100Q", "Other"];
 const SIZES = ["32", "40", "43", "50", "55", "65", "75", "85", "100", "Other"];
 const ACCOUNT_CREATION_SECRET = "C2ULTRA!";
+const PRIMARY_ACCOUNT_USERNAME = "03h043";
 const PRODUCT_TYPES = ["UHD", "QLED", "MINI LED", "RGB", "LASER"];
 const DEFAULT_MODEL_CATEGORIES = {
   A4Q: "UHD",
@@ -69,6 +70,7 @@ export default {
 async function handleApi(request, env, url) {
   const db = requireDb(env);
   await ensureSchema(db);
+  await assignUnlocatedSalesToPrimaryAccount(db);
 
   if (request.method === "GET" && url.pathname === "/api/status") {
     const users = await count(db, "users");
@@ -202,6 +204,7 @@ async function handleAdmin(request, env, url) {
 
   if (!(await adminPasswordHash(db))) return html(adminSetup(), request);
   if (!(await isAdmin(request, db))) return html(adminLogin(), request);
+  await assignUnlocatedSalesToPrimaryAccount(db);
 
   if (request.method === "POST" && url.pathname === "/admin/users/save") {
     await adminSaveUser(request, db);
@@ -803,6 +806,21 @@ async function authenticatedUser(db, body) {
 
 async function getUser(db, username) {
   return db.prepare("SELECT * FROM users WHERE lower(username)=lower(?)").bind(username).first();
+}
+
+async function assignUnlocatedSalesToPrimaryAccount(db) {
+  const user = await getUser(db, PRIMARY_ACCOUNT_USERNAME);
+  if (!user) return 0;
+  const result = await db.prepare(`
+    UPDATE sales
+    SET username=?, region=?, store=?
+    WHERE brand='Hisense'
+      AND (
+        trim(username) = ''
+        OR lower(trim(username)) IN ('unknown', 'unassigned', 'not located', 'not located to an account', 'no account')
+      )
+  `).bind(user.username, user.region, user.store).run();
+  return Number(result?.meta?.changes || 0);
 }
 
 async function upsertSale(db, sale) {
