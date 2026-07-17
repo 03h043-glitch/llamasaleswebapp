@@ -46,10 +46,18 @@ const ALLOWED_ORIGINS = new Set([
   "http://localhost:5173",
   "http://127.0.0.1:5173"
 ]);
+const WEBAPP_SUSPENDED = true;
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+
+    if (WEBAPP_SUSPENDED) {
+      if (url.pathname === "/sw.js" && (request.method === "GET" || request.method === "HEAD")) {
+        return env.ASSETS.fetch(request);
+      }
+      return suspendedResponse(request);
+    }
 
     if (request.method === "OPTIONS") return corsResponse(null, request, 204);
 
@@ -66,6 +74,38 @@ export default {
     }
   }
 };
+
+function suspendedResponse(request) {
+  const body = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <title>LLAMA unavailable</title>
+  <style>
+    :root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#05030a;color:#f8fafc;font-family:Segoe UI,Arial,sans-serif;padding:24px}.notice{width:min(520px,100%);border:1px solid rgba(0,170,166,.72);background:#11141a;padding:28px;text-align:center}.brand{margin:0 0 12px;color:#00aaa6;font-size:38px;font-weight:900}.message{margin:0;color:#b3bfd2;font-size:18px;line-height:1.5}
+  </style>
+</head>
+<body>
+  <main class="notice">
+    <h1 class="brand">LLAMA</h1>
+    <p class="message">This service is currently unavailable.</p>
+  </main>
+</body>
+</html>`;
+  return new Response(request.method === "HEAD" ? null : body, {
+    status: 503,
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store, no-cache, must-revalidate",
+      "Pragma": "no-cache",
+      "Expires": "0",
+      "X-Robots-Tag": "noindex, nofollow, noarchive",
+      "Set-Cookie": `${ADMIN_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`
+    }
+  });
+}
 
 async function handleApi(request, env, url) {
   const db = requireDb(env);
