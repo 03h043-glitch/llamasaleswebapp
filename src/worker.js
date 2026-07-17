@@ -818,6 +818,11 @@ async function assignUnlocatedSalesToPrimaryAccount(db) {
       AND (
         trim(username) = ''
         OR lower(trim(username)) IN ('unknown', 'unassigned', 'not located', 'not located to an account', 'no account')
+        OR NOT EXISTS (
+          SELECT 1
+          FROM users
+          WHERE lower(users.username) = lower(trim(sales.username))
+        )
       )
   `).bind(user.username, user.region, user.store).run();
   return Number(result?.meta?.changes || 0);
